@@ -1,0 +1,21 @@
+[project]
+name = "yodle"
+version = "1.0.0"
+description = "Unified YouTube Downloader with GUI and CLI"
+readme = "README.md"
+requires-python = ">=3.11, <3.13"
+dependencies = [
+    "browser-cookie3>=0.19.1",
+    "mutagen>=1.47.0",
+    "pillow>=10.0.0",
+    "pydub>=0.25.1",
+    "requests>=2.31.0",
+    "yt-dlp>=2024.1.1",
+]
+
+[project.scripts]
+yodle = "yodle:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

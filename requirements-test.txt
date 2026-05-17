@@ -1,0 +1,27 @@
+# Testing dependencies for Yodle
+
+# Core testing framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0  # For async test support
+pytest-mock>=3.11.0     # Simplified mocking with mocker fixture
+
+# Code coverage
+pytest-cov>=4.1.0
+
+# Optional: Enhanced testing tools
+pytest-timeout>=2.1.0   # Timeout support for hanging tests
+pytest-xdist>=3.3.0     # Parallel test execution with -n flag
+
+# Optional: Test output formatting
+pytest-html>=3.2.0      # HTML test reports
+
+# Optional: Watch mode for TDD
+pytest-watch>=4.2.0     # Auto-run tests on file changes
+
+# Application dependencies (should match yodle.py requirements)
+yt-dlp>=2024.1.1
+mutagen>=1.47.0
+pydub>=0.25.1
+pillow>=10.0.0
+requests>=2.31.0
+browsercookie>=0.7.7
