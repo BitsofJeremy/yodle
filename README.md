@@ -1,8 +1,9 @@
 # Yodle - YouTube Downloader
 
-A powerful, all-in-one YouTube downloader with both GUI and CLI interfaces. Download videos, music, and channel thumbnails with ease. Built with Python and optimized for simplicity and reliability.
+A powerful, all-in-one YouTube downloader CLI interfaces.
 
-![screenshot](./assets/screenshot.png)
+Download videos, music, and channel thumbnails with ease. Built with Python and optimized for simplicity and reliability.
+
 
 ---
 
@@ -13,7 +14,6 @@ A powerful, all-in-one YouTube downloader with both GUI and CLI interfaces. Down
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Usage](#usage)
-  - [GUI Mode](#gui-mode)
   - [CLI Mode](#cli-mode)
 - [CLI Options and Flags](#cli-options-and-flags)
 - [Configuration](#configuration)
@@ -182,41 +182,6 @@ yodle
 
 ## Usage
 
-### GUI Mode
-
-Launch the GUI with no arguments:
-
-```bash
-uv run yodle
-```
-
-#### GUI Features
-
-1. **URL Input Area** (top): Paste YouTube URLs, one per line
-2. **Download Type Selection**: Choose between Video, Music, Both, or Thumbnails
-3. **Format Selection**: Select output format for video (MP4/MKV/WebM) and audio (MP3/M4A)
-4. **Browser Cookies**: Select a browser to extract cookies, use a custom file, or skip authentication
-5. **Progress Bar**: Visual feedback with percentage completion
-6. **Status Log**: Real-time, timestamped log of all operations and update notifications
-
-#### GUI Workflow
-
-1. Paste one or more YouTube URLs into the URL input box
-2. Select your desired download type (Video/Music/Both/Thumbnails)
-3. Choose output formats if needed
-4. Select browser or cookie authentication method (optional for public videos)
-5. Click "DOWNLOAD" to start
-6. Monitor progress in the status log
-7. Downloaded files appear in `~/Downloads/Yodle/`
-
-#### Format Selection Behavior
-
-The GUI intelligently shows relevant format options based on your download type selection:
-
-- **Video selected**: Shows video format selector (MP4/MKV/WebM), audio format disabled
-- **Music selected**: Shows audio format selector (MP3/M4A), video format disabled
-- **Both selected**: Shows both format selectors
-- **Thumbnails selected**: Both format selectors disabled
 
 ---
 
