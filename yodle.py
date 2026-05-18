@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Yodle - Unified YouTube Downloader
+Yodle - YouTube Downloader CLI
 
-A GUI and CLI application for downloading YouTube videos, music (MP3/M4A),
+A CLI application for downloading YouTube videos, music (MP3/M4A),
 and channel thumbnails.
 
 Features:
@@ -10,37 +10,29 @@ Features:
 - Music downloads (MP3/M4A with embedded ID3 tags and album art)
 - Channel thumbnail downloads (original + resized)
 - Browser cookie extraction for private/age-restricted content
-- Auto-update checking for yt-dlp
-- GUI and CLI modes
 
 Requirements:
 - Python 3.11+
 - ffmpeg (must be on system PATH)
 
 Usage:
-    # GUI mode
-    uv run yodle
-
-    # CLI mode
     uv run yodle 'https://youtube.com/watch?v=...'
     uv run yodle -t music --audio-format m4a 'URL'
+    uv run yodle -t both --video-format mkv --audio-format m4a 'URL'
+    uv run yodle -b chrome 'https://youtube.com/watch?v=...'
 """
 
 import asyncio
 import functools
 import logging
 import os
-import queue
 import re
 import subprocess
 import sys
 import tempfile
-import threading
-import tkinter as tk
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from tkinter import messagebox, ttk
 from typing import Callable, List, Optional, Tuple
 
 # Third-party imports
@@ -893,389 +885,12 @@ class DownloadManager:
 
 
 # =============================================================================
-# GUI APPLICATION
-# =============================================================================
-
-
-class YodleGUI:
-    """Main application GUI using Tkinter."""
-
-    def __init__(self):
-        self.root = tk.Tk()
-        self.root.title("Yodle - YouTube Downloader")
-        self.root.geometry("600x550")
-        self.root.resizable(True, True)
-
-        # State
-        self.is_downloading = False
-        self.message_queue = queue.Queue()
-        self.update_checker = UpdateChecker()
-
-        # Variables
-        self.type_var = tk.StringVar(value="both")
-        self.browser_var = tk.StringVar(value="None")
-        self.progress_var = tk.DoubleVar(value=0)
-        self.video_format_var = tk.StringVar(value="mp4")
-        self.audio_format_var = tk.StringVar(value="mp3")
-
-        # Build GUI
-        self._setup_gui()
-
-        # Initialize format options state
-        self._update_format_options()
-
-        # Start message processing
-        self.root.after(100, self._process_queue)
-
-        # Check for updates in background
-        self._check_updates_async()
-
-    def _setup_gui(self) -> None:
-        """Initialize all GUI components."""
-        # Main container with padding
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # URL Input
-        self.url_label = ttk.Label(main_frame, text="URL(s) - one per line:")
-        self.url_label.pack(anchor=tk.W, pady=(10, 2))
-
-        url_frame = ttk.Frame(main_frame)
-        url_frame.pack(fill=tk.X, pady=(0, 10))
-
-        self.url_text = tk.Text(url_frame, height=5, font=("Courier", 11))
-        self.url_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        url_scroll = ttk.Scrollbar(
-            url_frame, orient=tk.VERTICAL, command=self.url_text.yview
-        )
-        url_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.url_text.config(yscrollcommand=url_scroll.set)
-
-        # Download Type
-        type_frame = ttk.LabelFrame(main_frame, text="Download Type", padding="5")
-        type_frame.pack(fill=tk.X, pady=(0, 10))
-
-        for text, value in [
-            ("Video", "video"),
-            ("Music", "music"),
-            ("Both", "both"),
-            ("Thumbnails", "thumbnails"),
-        ]:
-            rb = ttk.Radiobutton(
-                type_frame,
-                text=text,
-                value=value,
-                variable=self.type_var,
-                command=self._update_format_options,
-            )
-            rb.pack(side=tk.LEFT, padx=10)
-
-        # Format Selection
-        format_frame = ttk.Frame(main_frame)
-        format_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ttk.Label(format_frame, text="Video Format:").pack(side=tk.LEFT)
-        self.video_format_combo = ttk.Combobox(
-            format_frame,
-            textvariable=self.video_format_var,
-            values=["mp4", "mkv", "webm"],
-            state="readonly",
-            width=10,
-        )
-        self.video_format_combo.pack(side=tk.LEFT, padx=(10, 20))
-
-        ttk.Label(format_frame, text="Audio Format:").pack(side=tk.LEFT)
-        self.audio_format_combo = ttk.Combobox(
-            format_frame,
-            textvariable=self.audio_format_var,
-            values=["mp3", "m4a"],
-            state="readonly",
-            width=10,
-        )
-        self.audio_format_combo.pack(side=tk.LEFT, padx=(10, 0))
-
-        # Browser Cookies
-        cookie_frame = ttk.Frame(main_frame)
-        cookie_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ttk.Label(cookie_frame, text="Browser Cookies:").pack(side=tk.LEFT)
-
-        self.browser_combo = ttk.Combobox(
-            cookie_frame,
-            textvariable=self.browser_var,
-            values=["None", "Chrome", "Firefox", "Custom file..."],
-            state="readonly",
-            width=15,
-        )
-        self.browser_combo.pack(side=tk.LEFT, padx=(10, 0))
-        self.browser_combo.bind("<<ComboboxSelected>>", self._on_browser_selected)
-
-        # Store custom cookies path
-        self.custom_cookies_path: Optional[Path] = None
-
-        # Output Path
-        output_frame = ttk.Frame(main_frame)
-        output_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ttk.Label(output_frame, text="Output:").pack(side=tk.LEFT)
-        ttk.Label(output_frame, text=str(OUTPUT_DIR), foreground="gray").pack(
-            side=tk.LEFT, padx=(10, 0)
-        )
-
-        # Progress Bar
-        progress_frame = ttk.Frame(main_frame)
-        progress_frame.pack(fill=tk.X, pady=(0, 10))
-
-        self.progress_bar = ttk.Progressbar(
-            progress_frame, variable=self.progress_var, maximum=100
-        )
-        self.progress_bar.pack(fill=tk.X, side=tk.LEFT, expand=True)
-
-        self.progress_label = ttk.Label(progress_frame, text="0%", width=6)
-        self.progress_label.pack(side=tk.RIGHT, padx=(10, 0))
-
-        # Download Button
-        self.download_btn = ttk.Button(
-            main_frame, text="DOWNLOAD", command=self._start_download
-        )
-        self.download_btn.pack(fill=tk.X, pady=(0, 10), ipady=10)
-
-        # Status Log
-        log_label = ttk.Label(main_frame, text="Status Log:")
-        log_label.pack(anchor=tk.W, pady=(10, 2))
-
-        log_frame = ttk.Frame(main_frame)
-        log_frame.pack(fill=tk.BOTH, expand=True)
-
-        self.log_text = tk.Text(
-            log_frame,
-            height=10,
-            state=tk.DISABLED,
-            font=("Courier", 10),
-            background="#f5f5f5",
-            foreground="#000000",
-        )
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        log_scroll = ttk.Scrollbar(
-            log_frame, orient=tk.VERTICAL, command=self.log_text.yview
-        )
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.log_text.config(yscrollcommand=log_scroll.set)
-
-    def _check_updates_async(self) -> None:
-        """Check for updates in background thread."""
-
-        def check():
-            result = self.update_checker.check_for_updates()
-            self.root.after(0, self._handle_update_result, result)
-
-        thread = threading.Thread(target=check, daemon=True)
-        thread.start()
-
-    def _handle_update_result(self, result: Tuple[bool, str, str]) -> None:
-        """Handle update check result on main thread."""
-        update_available, current, latest = result
-        if update_available:
-            cmd = self.update_checker.get_update_command()
-            self._append_log("=" * 60)
-            self._append_log(f"UPDATE AVAILABLE: yt-dlp {current} → {latest}")
-            self._append_log(f"To update, run: {cmd}")
-            self._append_log("=" * 60)
-
-    def _on_browser_selected(self, event) -> None:
-        """Handle browser selection change."""
-        if self.browser_var.get() == "Custom file...":
-            from tkinter import filedialog
-
-            file_path = filedialog.askopenfilename(
-                title="Select cookies.txt file",
-                filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-                initialdir=str(Path.home()),
-            )
-            if file_path:
-                self.custom_cookies_path = Path(file_path)
-                self.browser_var.set(f"Custom: {Path(file_path).name}")
-            else:
-                # User cancelled, reset to None
-                self.browser_var.set("None")
-                self.custom_cookies_path = None
-
-    def _update_format_options(self) -> None:
-        """Update format selector visibility based on download type."""
-        download_type = self.type_var.get()
-
-        # Enable/disable format selectors based on download type
-        if download_type == "video":
-            self.video_format_combo.config(state="readonly")
-            self.audio_format_combo.config(state="disabled")
-        elif download_type == "music":
-            self.video_format_combo.config(state="disabled")
-            self.audio_format_combo.config(state="readonly")
-        elif download_type == "both":
-            self.video_format_combo.config(state="readonly")
-            self.audio_format_combo.config(state="readonly")
-        else:  # thumbnails
-            self.video_format_combo.config(state="disabled")
-            self.audio_format_combo.config(state="disabled")
-
-    def _process_queue(self) -> None:
-        """Process messages from worker thread."""
-        try:
-            while True:
-                msg_type, data = self.message_queue.get_nowait()
-
-                if msg_type == "progress":
-                    percent, eta = data
-                    self.progress_var.set(percent)
-                    self.progress_label.config(text=f"{percent:.0f}%")
-
-                elif msg_type == "log":
-                    self._append_log(data)
-
-                elif msg_type == "complete":
-                    self._download_complete(data)
-
-        except queue.Empty:
-            pass
-        finally:
-            self.root.after(100, self._process_queue)
-
-    def _append_log(self, message: str) -> None:
-        """Append message to log."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, f"[{timestamp}] {message}\n")
-        self.log_text.see(tk.END)
-        self.log_text.config(state=tk.DISABLED)
-
-    def _start_download(self) -> None:
-        """Start download in background thread."""
-        if self.is_downloading:
-            return
-
-        # Get URLs
-        urls_text = self.url_text.get("1.0", tk.END).strip()
-        if not urls_text:
-            messagebox.showwarning("No URLs", "Please enter at least one URL.")
-            return
-
-        urls = [u.strip() for u in urls_text.split("\n") if u.strip()]
-
-        # Check ffmpeg
-        if not check_ffmpeg():
-            messagebox.showerror(
-                "Missing Dependency",
-                "ffmpeg is required but not found.\n\nInstall with: brew install ffmpeg",
-            )
-            return
-
-        # Start download
-        self.is_downloading = True
-        self.download_btn.config(text="DOWNLOADING...", state=tk.DISABLED)
-        self.progress_var.set(0)
-
-        download_type = self.type_var.get()
-        browser = self.browser_var.get()
-
-        thread = threading.Thread(
-            target=self._download_worker,
-            args=(urls, download_type, browser),
-            daemon=True,
-        )
-        thread.start()
-
-    def _download_worker(
-        self, urls: List[str], download_type: str, browser: str
-    ) -> None:
-        """Worker function running in background thread."""
-        try:
-            # Extract or use custom cookies if needed
-            cookies_path = None
-            if browser.startswith("Custom:"):
-                # Use custom cookies file
-                if self.custom_cookies_path and self.custom_cookies_path.exists():
-                    cookies_path = self.custom_cookies_path
-                    self.message_queue.put(
-                        (
-                            "log",
-                            f"Using custom cookies: {self.custom_cookies_path.name}",
-                        )
-                    )
-                else:
-                    self.message_queue.put(
-                        ("log", "Custom cookies file not found, continuing without")
-                    )
-            elif browser != "None":
-                # Extract cookies from browser
-                self.message_queue.put(("log", f"Extracting cookies from {browser}..."))
-                cookies_path = CookieManager.extract_cookies(browser.lower())
-                if cookies_path:
-                    self.message_queue.put(("log", "Cookies extracted successfully"))
-                else:
-                    self.message_queue.put(
-                        ("log", "Could not extract cookies, continuing without")
-                    )
-
-            # Progress callback
-            def progress_cb(percent: float, eta: str) -> None:
-                self.message_queue.put(("progress", (percent, eta)))
-
-            # Log callback
-            def log_cb(message: str) -> None:
-                self.message_queue.put(("log", message))
-
-            # Download
-            manager = DownloadManager(
-                output_dir=OUTPUT_DIR,
-                cookies_path=cookies_path,
-                progress_callback=progress_cb,
-                log_callback=log_cb,
-                video_format=self.video_format_var.get(),
-                audio_format=self.audio_format_var.get(),
-            )
-
-            results = manager.download(urls, download_type)
-
-            self.message_queue.put(("complete", results))
-
-        except Exception as e:
-            self.message_queue.put(("log", f"Error: {e}"))
-            self.message_queue.put(("complete", []))
-
-    def _download_complete(self, results: List[DownloadResult]) -> None:
-        """Handle download completion."""
-        self.is_downloading = False
-        self.download_btn.config(text="DOWNLOAD", state=tk.NORMAL)
-        self.progress_var.set(100)
-        self.progress_label.config(text="100%")
-
-        # Summary
-        success_count = sum(1 for r in results if r.success)
-        fail_count = len(results) - success_count
-
-        self._append_log(f"Complete: {success_count} succeeded, {fail_count} failed")
-        self._append_log(f"Files saved to: {OUTPUT_DIR}")
-
-        if success_count > 0:
-            messagebox.showinfo(
-                "Download Complete",
-                f"Downloaded {success_count} item(s) to:\n{OUTPUT_DIR}",
-            )
-
-    def run(self) -> None:
-        """Start the main event loop."""
-        self.root.mainloop()
-
-
-# =============================================================================
 # MAIN ENTRY POINT
 # =============================================================================
 
 
-def run_cli_download(args):
-    """Run download in CLI mode without GUI."""
+def run_download(args):
+    """Run download from CLI args."""
     # Check ffmpeg
     if not check_ffmpeg():
         print("ERROR: ffmpeg not found. Install with: brew install ffmpeg")
@@ -1340,9 +955,6 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # GUI mode (no arguments)
-  uv run yodle
-
   # Download video as MP4
   uv run yodle 'https://youtube.com/watch?v=...'
 
@@ -1398,19 +1010,11 @@ Examples:
     # Ensure output directory exists
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # If URLs provided, run in CLI mode
-    if args.urls:
-        run_cli_download(args)
-    else:
-        # No URLs provided, run GUI mode
-        # Check ffmpeg at startup
-        if not check_ffmpeg():
-            print("WARNING: ffmpeg not found. Install with: brew install ffmpeg")
-            print("Some features may not work without ffmpeg.\n")
+    if not args.urls:
+        parser.print_help()
+        sys.exit(0)
 
-        # Run GUI
-        app = YodleGUI()
-        app.run()
+    run_download(args)
 
 
 if __name__ == "__main__":
