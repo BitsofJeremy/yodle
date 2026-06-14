@@ -508,15 +508,28 @@ class MusicDownloader:
 
             audio["TCON"] = TCON(encoding=3, text="Music")
 
-            # Try to embed thumbnail
-            thumbnail_path = mp3_path.with_suffix(".png")
-            if not thumbnail_path.exists():
-                thumbnail_path = mp3_path.with_suffix(".jpg")
+            # Try to embed thumbnail — check multiple possible paths
+            thumbnail_path = None
+            for ext in (".png", ".jpg", ".webp"):
+                candidate = mp3_path.with_suffix(ext)
+                if candidate.exists():
+                    thumbnail_path = candidate
+                    break
+            # Also check for yt-dlp's thumbnail filename pattern
+            if not thumbnail_path:
+                for ext in (".png", ".jpg", ".webp"):
+                    candidate = mp3_path.parent / f"{mp3_path.stem}{ext}"
+                    if candidate.exists():
+                        thumbnail_path = candidate
+                        break
 
-            if thumbnail_path.exists():
+            if thumbnail_path and thumbnail_path.exists():
                 with open(thumbnail_path, "rb") as thumb_file:
                     mime = (
-                        "image/png" if thumbnail_path.suffix == ".png" else "image/jpeg"
+                        "image/png"
+                        if thumbnail_path.suffix == ".png"
+                        else "image/jpeg" if thumbnail_path.suffix == ".jpg"
+                        else "image/webp"
                     )
                     audio["APIC"] = APIC(
                         encoding=3,
@@ -525,6 +538,9 @@ class MusicDownloader:
                         desc="Cover",
                         data=thumb_file.read(),
                     )
+                    logger.info(f"Embedded thumbnail from: {thumbnail_path.name}")
+            else:
+                logger.warning(f"No thumbnail found for ID3 embedding near: {mp3_path.name}")
 
             audio.save()
             logger.info(f"Embedded ID3 tags in: {mp3_path.name}")
@@ -544,19 +560,27 @@ class MusicDownloader:
                 title = info.get("title", "Unknown")
                 base_name = sanitize_filename(title)
 
-                # Download and save thumbnail as PNG
-                thumbnail_url = info.get("thumbnail")
-                if thumbnail_url:
-                    self._save_thumbnail_png(output_dir, thumbnail_url, base_name)
-
                 # Find the downloaded file (M4A or MP3)
                 ext = self.output_format.lower()
                 audio_path = output_dir / f"{base_name}.{ext}"
                 if not audio_path.exists():
                     # Try original title
                     audio_path = output_dir / f"{title}.{ext}"
+                if not audio_path.exists():
+                    # Fallback: find any file with the right extension in output dir
+                    for f in output_dir.glob(f"*.{ext}"):
+                        audio_path = f
+                        break
+
+                # Save thumbnail using the actual audio filename stem so it matches
+                thumbnail_url = info.get("thumbnail")
+                if thumbnail_url and audio_path.exists():
+                    self._save_thumbnail_png(output_dir, thumbnail_url, audio_path.stem)
 
                 if audio_path.exists():
+                    # Embed custom ID3 tags and thumbnail for MP3
+                    if ext == "mp3":
+                        self._embed_id3_tags(audio_path, info)
                     return DownloadResult(
                         success=True,
                         url=url,
