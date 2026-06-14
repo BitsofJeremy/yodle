@@ -335,6 +335,14 @@ Or inline:
 YODLE_OUTPUT_DIR="/path/to/your/output" uv run yodle
 ```
 
+You can also create a `.env` file in the project root:
+
+```bash
+YODLE_OUTPUT_DIR=/path/to/your/output
+```
+
+Yodle loads `.env` automatically on startup.
+
 ### Cookies Storage
 
 Extracted cookies are automatically saved to:

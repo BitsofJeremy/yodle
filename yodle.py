@@ -37,6 +37,7 @@ from typing import Callable, List, Optional, Tuple
 
 # Third-party imports
 import browser_cookie3
+from dotenv import load_dotenv
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TCON
 from PIL import Image
@@ -44,6 +45,9 @@ from pydub import AudioSegment
 import requests
 import yt_dlp
 from yt_dlp import YoutubeDL
+
+# Load environment variables from .env file (e.g., YODLE_OUTPUT_DIR)
+load_dotenv()
 
 # =============================================================================
 # CONSTANTS & CONFIGURATION
