@@ -6,11 +6,11 @@ Download videos, music, and channel thumbnails with ease. Built with Python and 
 
 > **Recent Update:** The output directory is now configurable via the `YODLE_OUTPUT_DIR` environment variable and defaults to `~/Yodle`. The previous hardcoded network mount logic has been removed.
 
-
 ---
 
 ## Table of Contents
 
+- [Recent Updates](#recent-updates)
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Requirements](#requirements)
@@ -23,6 +23,40 @@ Download videos, music, and channel thumbnails with ease. Built with Python and 
 - [Output Directory Structure](#output-directory-structure)
 - [Troubleshooting](#troubleshooting)
 - [Advanced Features](#advanced-features)
+
+---
+
+## Recent Updates
+
+### Configurable Output Directory
+
+Yodle now uses the `YODLE_OUTPUT_DIR` environment variable to determine where downloads are saved. If not set, downloads go to `~/Yodle`.
+
+You can set it several ways:
+
+**Environment variable:**
+```bash
+export YODLE_OUTPUT_DIR="/path/to/your/output"
+uv run yodle
+```
+
+**Inline:**
+```bash
+YODLE_OUTPUT_DIR="/path/to/your/output" uv run yodle
+```
+
+**.env file** (in the project root):
+```bash
+YODLE_OUTPUT_DIR=/path/to/your/output
+```
+
+### Removed Hardcoded Mount Logic
+
+Earlier versions of Yodle contained hardcoded Samba share credentials and auto-mount logic. This has been completely removed. Output paths are now configured explicitly by you via `YODLE_OUTPUT_DIR`.
+
+### Default Output Path Changed
+
+The default output directory has changed from `~/Downloads/Yodle` to `~/Yodle`. If you previously relied on the old path, either move your files or set `YODLE_OUTPUT_DIR` to `~/Downloads/Yodle`.
 
 ---
 
