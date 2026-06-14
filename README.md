@@ -4,6 +4,8 @@ A powerful, all-in-one YouTube downloader CLI interfaces.
 
 Download videos, music, and channel thumbnails with ease. Built with Python and optimized for simplicity and reliability.
 
+> **Recent Update:** The output directory is now configurable via the `YODLE_OUTPUT_DIR` environment variable and defaults to `~/Yodle`. The previous hardcoded network mount logic has been removed.
+
 
 ---
 
@@ -317,13 +319,20 @@ uv run yodle --cookies-file ~/Downloads/my_cookies.txt 'URL'
 All downloaded files are saved to:
 
 ```
-~/Downloads/Yodle/
+~/Yodle/
 ```
 
-This directory is created automatically on first use. You can change this by modifying the `OUTPUT_DIR` constant in `yodle.py`:
+This directory is created automatically on first use. To use a custom output location, set the `YODLE_OUTPUT_DIR` environment variable before running Yodle:
 
-```python
-OUTPUT_DIR = Path.home() / "Downloads" / "Yodle"
+```bash
+export YODLE_OUTPUT_DIR="/path/to/your/output"
+uv run yodle
+```
+
+Or inline:
+
+```bash
+YODLE_OUTPUT_DIR="/path/to/your/output" uv run yodle
 ```
 
 ### Cookies Storage
@@ -464,7 +473,7 @@ DownloadManager.download()
 ### Single Video Download
 
 ```
-~/Downloads/Yodle/
+~/Yodle/
 ├── Video_Title-[video_id].mp4          # Video file
 └── Video_Title-[video_id].png          # Video thumbnail
 ```
@@ -472,7 +481,7 @@ DownloadManager.download()
 ### Single Music Download
 
 ```
-~/Downloads/Yodle/
+~/Yodle/
 ├── Video_Title.mp3                     # Audio file (with ID3 tags)
 ├── Video_Title.m4a                     # Alternative audio format (if selected)
 └── Video_Title.png                     # Thumbnail (embedded in audio tags)
@@ -481,7 +490,7 @@ DownloadManager.download()
 ### Playlist Download
 
 ```
-~/Downloads/Yodle/
+~/Yodle/
 └── Playlist_Name/                      # Playlist folder
     ├── Video1_Title-[id].mp4          # Video files
     ├── Video1_Title-[id].png          # Video thumbnails
@@ -496,7 +505,7 @@ DownloadManager.download()
 ### Channel Thumbnail Download
 
 ```
-~/Downloads/Yodle/
+~/Yodle/
 └── Thumbnails/
     └── Channel_Name/
         ├── original/
@@ -829,7 +838,7 @@ A URL is considered a playlist if it contains:
 Downloaded playlist items are automatically organized in a folder:
 
 ```
-~/Downloads/Yodle/Playlist_Name/
+~/Yodle/Playlist_Name/
 ├── Video1_Title-[id].mp4
 ├── Video1_Title.mp3
 ├── Video2_Title-[id].mp4
@@ -894,7 +903,7 @@ Downloaded thumbnails have different behaviors based on download type.
 Thumbnail is saved as PNG file alongside the video:
 
 ```
-~/Downloads/Yodle/
+~/Yodle/
 ├── Video_Title-[id].mp4
 └── Video_Title-[id].png
 ```
@@ -916,7 +925,7 @@ No separate file is created (it's embedded in the audio file).
 Two versions are created:
 
 ```
-~/Downloads/Yodle/Thumbnails/Channel_Name/
+~/Yodle/Thumbnails/Channel_Name/
 ├── original/
 │   └── video_id.png                    # Original resolution
 └── resized_512/
