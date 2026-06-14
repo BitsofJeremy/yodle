@@ -50,7 +50,7 @@ from yt_dlp import YoutubeDL
 # =============================================================================
 
 VERSION = "1.0.0"
-OUTPUT_DIR = Path.home() / "Downloads" / "Yodle"
+OUTPUT_DIR = Path(os.environ.get("YODLE_OUTPUT_DIR", Path.home() / "Yodle"))
 COOKIES_PATH = Path.home() / ".config" / "yt-dlp" / "cookies.txt"
 
 # Common yt-dlp options applied to all extractors.

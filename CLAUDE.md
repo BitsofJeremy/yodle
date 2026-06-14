@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Yodle is a YouTube downloader with a GUI for downloading videos, music (MP3), and channel thumbnails. Downloads are saved to `~/Downloads/Yodle/`.
+Yodle is a YouTube downloader with a GUI for downloading videos, music (MP3), and channel thumbnails. Downloads are saved to `~/Yodle` by default, or to the path set via the `YODLE_OUTPUT_DIR` environment variable.
 
 ## Quick Start
 
@@ -65,22 +65,29 @@ Checks for yt-dlp updates at startup and displays a notification banner if outda
 ## Output Structure
 
 ```
-~/Downloads/Yodle/
-├── Video_Title-[video_id].mp4       # Single video
-├── Video_Title-[video_id].png       # Video thumbnail (saved separately)
-├── Video_Title.mp3                   # Single music
-├── Video_Title.png                   # Music thumbnail (saved separately)
-├── Playlist_Name/                    # Playlist downloads
+~/Yodle/                              # Default output directory
+├── Video_Title-[video_id].mp4
+├── Video_Title-[video_id].png
+├── Video_Title.mp3
+├── Video_Title.png
+├── Playlist_Name/
 │   ├── Video1-[id].mp4
-│   ├── Video1-[id].png              # Video thumbnail
+│   ├── Video1-[id].png
 │   ├── Video1.mp3
-│   └── Video1.png                   # Music thumbnail
-└── Thumbnails/                       # Channel thumbnails
+│   └── Video1.png
+└── Thumbnails/
     └── Channel_Name/
         ├── original/
         │   └── video_id.png
         └── resized_512/
             └── video_id.png
+```
+
+To use a custom output location, set the environment variable before running:
+
+```bash
+export YODLE_OUTPUT_DIR="/path/to/your/output"
+uv run yodle.py
 ```
 
 **Note**: Thumbnails are automatically downloaded and saved as PNG files alongside video and music downloads. Music files also have thumbnails embedded in ID3 tags for music player compatibility.
@@ -152,4 +159,4 @@ ffmpeg -version
 - Quote URLs in zsh: `uv run yodle.py` then paste URL in GUI
 - For private/age-restricted videos, select your browser for cookie extraction
 - Channel thumbnail mode expects a channel URL (e.g., `https://youtube.com/@channelname`)
-- Downloads saved to: `~/Downloads/Yodle/`
+- Downloads saved to: `~/Yodle/` by default, or to `$YODLE_OUTPUT_DIR` if set
