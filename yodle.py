@@ -22,6 +22,7 @@ Usage:
     uv run yodle -b chrome 'https://youtube.com/watch?v=...'
 """
 
+import argparse
 import asyncio
 import functools
 import logging
@@ -45,6 +46,7 @@ from pydub import AudioSegment
 import requests
 import yt_dlp
 from yt_dlp import YoutubeDL
+from yt_dlp.utils import download_range_func
 
 # Load environment variables from .env file (e.g., YODLE_OUTPUT_DIR)
 load_dotenv()
@@ -123,6 +125,46 @@ def check_ffmpeg() -> bool:
         return True
     except (FileNotFoundError, subprocess.CalledProcessError):
         return False
+
+
+_DURATION_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600}
+_DURATION_ERROR = (
+    "invalid --limit value {value!r}: expected DURATION as seconds (90, 90s), "
+    "minutes (59m), hours (2h), or H:MM:SS (1:30:00); must be positive"
+)
+
+
+def parse_duration(value: str) -> int:
+    """Parse a --limit duration string into positive seconds.
+
+    Accepted forms: plain seconds ("90"), unit suffix ("90s", "59m", "2h"),
+    or zero-padded clock form ("1:30:00"). Raises argparse.ArgumentTypeError
+    on anything else.
+    """
+    value = value.strip().lower()
+    seconds: Optional[int] = None
+
+    match = re.fullmatch(r"(\d+):([0-5]\d):([0-5]\d)", value)
+    if match:
+        hours, minutes, secs = (int(part) for part in match.groups())
+        seconds = hours * 3600 + minutes * 60 + secs
+    else:
+        match = re.fullmatch(r"(\d+)([smh]?)", value)
+        if match:
+            seconds = int(match.group(1)) * _DURATION_UNITS[match.group(2)]
+
+    if not seconds:
+        # Covers None (no grammar match), 0, and "0s"/"0m"/"0h"
+        raise argparse.ArgumentTypeError(_DURATION_ERROR.format(value=value))
+    return seconds
+
+
+def _apply_limit_opts(opts: dict, limit_seconds: Optional[int]) -> dict:
+    """Add yt-dlp download-range opts so only the first N seconds are fetched."""
+    if limit_seconds is not None:
+        opts["download_ranges"] = download_range_func(None, [(0, limit_seconds)])
+        opts["force_keyframes_at_cuts"] = True
+    return opts
 
 
 # =============================================================================
@@ -256,10 +298,12 @@ class VideoDownloader:
         cookies_path: Optional[Path] = None,
         progress_callback: Optional[Callable] = None,
         output_format: str = "mp4",
+        limit_seconds: Optional[int] = None,
     ):
         self.cookies_path = cookies_path
         self.progress_callback = progress_callback
         self.output_format = output_format.lower()
+        self.limit_seconds = limit_seconds
 
     def _get_opts(self, output_dir: Path) -> dict:
         """Get yt-dlp options for video download."""
@@ -279,7 +323,7 @@ class VideoDownloader:
         if self.progress_callback:
             opts["progress_hooks"] = [self._progress_hook]
 
-        return opts
+        return _apply_limit_opts(opts, self.limit_seconds)
 
     def _progress_hook(self, d: dict) -> None:
         """Progress hook for yt-dlp."""
@@ -400,10 +444,12 @@ class MusicDownloader:
         cookies_path: Optional[Path] = None,
         progress_callback: Optional[Callable] = None,
         output_format: str = "mp3",
+        limit_seconds: Optional[int] = None,
     ):
         self.cookies_path = cookies_path
         self.progress_callback = progress_callback
         self.output_format = output_format.lower()
+        self.limit_seconds = limit_seconds
 
     def _get_opts(self, output_dir: Path) -> dict:
         """Get yt-dlp options for music download."""
@@ -444,7 +490,7 @@ class MusicDownloader:
         if self.progress_callback:
             opts["progress_hooks"] = [self._progress_hook]
 
-        return opts
+        return _apply_limit_opts(opts, self.limit_seconds)
 
     def _progress_hook(self, d: dict) -> None:
         """Progress hook for yt-dlp."""
@@ -775,6 +821,7 @@ class DownloadManager:
         log_callback: Optional[Callable] = None,
         video_format: str = "mp4",
         audio_format: str = "mp3",
+        limit_seconds: Optional[int] = None,
     ):
         self.output_dir = output_dir
         self.cookies_path = cookies_path
@@ -782,10 +829,12 @@ class DownloadManager:
         self.log_callback = log_callback
 
         self.video_downloader = VideoDownloader(
-            cookies_path, progress_callback, video_format
+            cookies_path, progress_callback, video_format,
+            limit_seconds=limit_seconds,
         )
         self.music_downloader = MusicDownloader(
-            cookies_path, progress_callback, audio_format
+            cookies_path, progress_callback, audio_format,
+            limit_seconds=limit_seconds,
         )
         self.thumbnail_downloader = ThumbnailDownloader(progress_callback)
 
@@ -956,6 +1005,7 @@ def run_download(args):
         log_callback=log_cb,
         video_format=args.video_format,
         audio_format=args.audio_format,
+        limit_seconds=args.limit,
     )
 
     # Start download
@@ -976,8 +1026,6 @@ def run_download(args):
 
 def main():
     """Main entry point."""
-    import argparse
-
     parser = argparse.ArgumentParser(
         description="Yodle - YouTube Downloader",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -991,6 +1039,9 @@ Examples:
 
   # Download both video (MKV) and music (M4A)
   uv run yodle -t both --video-format mkv --audio-format m4a 'URL'
+
+  # Download only the first 90 seconds
+  uv run yodle --limit 90s 'https://youtube.com/watch?v=...'
 
   # Multiple URLs
   uv run yodle -t music 'URL1' 'URL2' 'URL3'
@@ -1022,6 +1073,17 @@ Examples:
         choices=["mp3", "m4a"],
         default="mp3",
         help="Audio output format (default: mp3)",
+    )
+
+    parser.add_argument(
+        "--limit",
+        type=parse_duration,
+        default=None,
+        metavar="DURATION",
+        help=(
+            "Download at most DURATION per video (90, 90s, 59m, 2h, or 1:30:00). "
+            "Default: full download. No-op with -t thumbnails."
+        ),
     )
 
     parser.add_argument(

@@ -23,14 +23,17 @@ class TestGetCookiesPath:
 
     def test_creates_parent_directory(self, tmp_path, mocker):
         """Test that parent directory is created if missing."""
+        # COOKIES_PATH is computed at import time, so patch the constant
+        # rather than Path.home()
         mock_home = tmp_path / "home"
-        mocker.patch("pathlib.Path.home", return_value=mock_home)
+        cookies_path = mock_home / ".config" / "yt-dlp" / "cookies.txt"
+        mocker.patch("yodle.COOKIES_PATH", cookies_path)
 
         path = CookieManager.get_cookies_path()
 
         assert path.parent.exists()
         assert path.parent.is_dir()
-        assert path == mock_home / ".config" / "yt-dlp" / "cookies.txt"
+        assert path == cookies_path
 
     def test_idempotent_creation(self, tmp_path, mocker):
         """Test multiple calls don't error if directory exists."""
@@ -63,8 +66,8 @@ class TestExtractCookies:
         cookies_path = tmp_path / "cookies.txt"
         mocker.patch.object(CookieManager, "get_cookies_path", return_value=cookies_path)
 
-        # Mock browsercookie.chrome()
-        mock_chrome = mocker.patch("browsercookie.chrome")
+        # Mock browser_cookie3.chrome()
+        mock_chrome = mocker.patch("browser_cookie3.chrome")
         mock_chrome.return_value = [mock_youtube_cookie]
 
         result = CookieManager.extract_cookies("chrome")
@@ -93,7 +96,7 @@ class TestExtractCookies:
         cookie.name = "SID"
         cookie.value = "session123"
 
-        mock_firefox = mocker.patch("browsercookie.firefox")
+        mock_firefox = mocker.patch("browser_cookie3.firefox")
         mock_firefox.return_value = [cookie]
 
         result = CookieManager.extract_cookies("firefox")
@@ -113,7 +116,7 @@ class TestExtractCookies:
         cookies_path = tmp_path / "cookies.txt"
         mocker.patch.object(CookieManager, "get_cookies_path", return_value=cookies_path)
 
-        mock_chrome = mocker.patch("browsercookie.chrome")
+        mock_chrome = mocker.patch("browser_cookie3.chrome")
         mock_chrome.return_value = [mock_youtube_cookie]
 
         # Try different cases
@@ -140,7 +143,7 @@ class TestExtractCookies:
         cookies_path = tmp_path / "cookies.txt"
         mocker.patch.object(CookieManager, "get_cookies_path", return_value=cookies_path)
 
-        mock_chrome = mocker.patch("browsercookie.chrome")
+        mock_chrome = mocker.patch("browser_cookie3.chrome")
         mock_chrome.side_effect = Exception("Browser database locked")
 
         result = CookieManager.extract_cookies("chrome")
@@ -156,7 +159,7 @@ class TestExtractCookies:
         # Create partial file
         cookies_path.write_text("# Netscape HTTP Cookie File\n")
 
-        mock_chrome = mocker.patch("browsercookie.chrome")
+        mock_chrome = mocker.patch("browser_cookie3.chrome")
         mock_chrome.side_effect = Exception("Error during iteration")
 
         result = CookieManager.extract_cookies("chrome")
@@ -196,7 +199,7 @@ class TestExtractCookies:
         other_cookie.secure = False
         other_cookie.expires = 1234567890
 
-        mock_chrome = mocker.patch("browsercookie.chrome")
+        mock_chrome = mocker.patch("browser_cookie3.chrome")
         mock_chrome.return_value = [youtube_cookie, google_cookie, other_cookie]
 
         CookieManager.extract_cookies("chrome")
@@ -230,7 +233,7 @@ class TestExtractCookies:
         insecure_cookie.name = "INSECURE"
         insecure_cookie.value = "no"
 
-        mock_chrome = mocker.patch("browsercookie.chrome")
+        mock_chrome = mocker.patch("browser_cookie3.chrome")
         mock_chrome.return_value = [secure_cookie, insecure_cookie]
 
         CookieManager.extract_cookies("chrome")
@@ -260,14 +263,16 @@ class TestExtractCookies:
         subdomain_cookie.value = "yes"
 
         exact_cookie = Mock()
-        exact_cookie.domain = "youtube.com"  # No leading dot = exact match
+        # No leading dot = exact host flag FALSE; must still pass the
+        # .youtube.com domain filter in extract_cookies
+        exact_cookie.domain = "www.youtube.com"
         exact_cookie.path = "/"
         exact_cookie.secure = True
         exact_cookie.expires = 1234567890
         exact_cookie.name = "EXACT"
         exact_cookie.value = "no"
 
-        mock_chrome = mocker.patch("browsercookie.chrome")
+        mock_chrome = mocker.patch("browser_cookie3.chrome")
         mock_chrome.return_value = [subdomain_cookie, exact_cookie]
 
         CookieManager.extract_cookies("chrome")
@@ -323,7 +328,8 @@ class TestCleanup:
             # Expected on some systems
             pass
         finally:
-            # Restore permissions for cleanup
-            cookies_path.chmod(0o644)
+            # Restore permissions for cleanup (file may already be gone —
+            # unlinking a read-only file succeeds when the directory is writable)
             if cookies_path.exists():
+                cookies_path.chmod(0o644)
                 cookies_path.unlink()

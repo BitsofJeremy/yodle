@@ -6,8 +6,10 @@ Tests cover:
 - is_playlist: YouTube playlist URL detection
 - is_channel: YouTube channel URL detection
 - check_ffmpeg: FFmpeg availability check
+- parse_duration: --limit duration parsing
 """
 
+import argparse
 import pytest
 import subprocess
 from pathlib import Path
@@ -16,7 +18,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from yodle import sanitize_filename, is_playlist, is_channel, check_ffmpeg
+from yodle import sanitize_filename, is_playlist, is_channel, check_ffmpeg, parse_duration
 
 
 class TestSanitizeFilename:
@@ -254,3 +256,56 @@ class TestCheckFfmpeg:
         except OSError:
             # Also acceptable if error propagates
             pass
+
+
+class TestParseDuration:
+    """Test suite for --limit duration parsing."""
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ("90", 90),
+            ("90s", 90),
+            ("90S", 90),
+            ("59m", 3540),
+            ("2h", 7200),
+            ("1h", 3600),
+            ("1:30:00", 5400),
+            ("0:00:30", 30),
+            ("  59m  ", 3540),
+        ],
+    )
+    def test_valid_durations(self, value, expected):
+        """Valid duration strings parse to the expected seconds."""
+        assert parse_duration(value) == expected
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "0",
+            "0s",
+            "0m",
+            "-1",
+            "abc",
+            "",
+            "1.5h",
+            "1m30s",
+            "90sec",
+            "1:30",
+            "1:60:00",
+            "1:30:60",
+            "1:3",
+        ],
+    )
+    def test_invalid_durations(self, value):
+        """Invalid duration strings raise ArgumentTypeError."""
+        with pytest.raises(argparse.ArgumentTypeError):
+            parse_duration(value)
+
+    def test_error_message_lists_accepted_forms(self):
+        """Error message helps the user recover."""
+        with pytest.raises(argparse.ArgumentTypeError) as excinfo:
+            parse_duration("bogus")
+        message = str(excinfo.value)
+        assert "59m" in message
+        assert "1:30:00" in message

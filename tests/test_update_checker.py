@@ -24,12 +24,9 @@ class TestGetCurrentVersion:
 
     def test_returns_version_string(self, mocker):
         """Test getting installed yt-dlp version."""
-        # Mock the yt_dlp module
-        mock_yt_dlp = Mock()
-        mock_yt_dlp.version.__version__ = "2024.12.01"
-
-        # Patch the import
-        mocker.patch("yodle.yt_dlp", mock_yt_dlp)
+        # get_current_version imports yt_dlp locally, so patch the attribute
+        # on the real module rather than yodle.yt_dlp
+        mocker.patch("yt_dlp.version.__version__", "2024.12.01")
 
         checker = UpdateChecker()
         version = checker.get_current_version()
@@ -38,10 +35,7 @@ class TestGetCurrentVersion:
 
     def test_handles_dev_versions(self, mocker):
         """Test handling development/pre-release versions."""
-        mock_yt_dlp = Mock()
-        mock_yt_dlp.version.__version__ = "2024.12.01.dev0"
-
-        mocker.patch("yodle.yt_dlp", mock_yt_dlp)
+        mocker.patch("yt_dlp.version.__version__", "2024.12.01.dev0")
 
         checker = UpdateChecker()
         version = checker.get_current_version()
@@ -227,12 +221,12 @@ class TestCheckForUpdates:
 class TestGetUpdateCommand:
     """Test suite for update command generation."""
 
-    def test_returns_uv_pip_command(self):
-        """Test that update command uses uv pip."""
+    def test_returns_uv_sync_command(self):
+        """Test that update command uses uv sync."""
         cmd = UpdateChecker.get_update_command()
 
-        assert "uv pip install" in cmd
-        assert "--upgrade" in cmd
+        assert "uv sync" in cmd
+        assert "--upgrade-package" in cmd
         assert "yt-dlp" in cmd
 
     def test_command_is_static_method(self):

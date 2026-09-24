@@ -10,7 +10,7 @@ Run slow tests: pytest tests/test_integration.py -m slow
 
 import pytest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -20,7 +20,8 @@ from yodle import (
     VideoDownloader,
     MusicDownloader,
     DownloadManager,
-    DownloadResult
+    DownloadResult,
+    _apply_limit_opts,
 )
 
 
@@ -33,7 +34,7 @@ class TestCookieIntegration:
         cookies_path = tmp_path / "cookies.txt"
         mocker.patch.object(CookieManager, "get_cookies_path", return_value=cookies_path)
 
-        mock_chrome = mocker.patch("browsercookie.chrome")
+        mock_chrome = mocker.patch("browser_cookie3.chrome")
         mock_chrome.return_value = [mock_youtube_cookie]
 
         # Extract cookies
@@ -55,7 +56,7 @@ class TestCookieIntegration:
         mocker.patch("yodle.COOKIES_PATH", cookies_path)
         mocker.patch.object(CookieManager, "get_cookies_path", return_value=cookies_path)
 
-        mock_chrome = mocker.patch("browsercookie.chrome")
+        mock_chrome = mocker.patch("browser_cookie3.chrome")
         mock_chrome.return_value = [mock_youtube_cookie]
 
         # Extract
@@ -133,25 +134,25 @@ class TestMusicPipeline:
     """Integration tests for music download pipeline."""
 
     def test_music_download_pipeline_mocked(self, tmp_path, mocker, mock_yt_dlp_info):
-        """Test complete music pipeline: download -> convert -> tag."""
-        # Mock yt-dlp download
+        """Test complete music pipeline: download -> convert (in yt-dlp) -> tag."""
+        # Mock yt-dlp download; conversion now happens inside yt-dlp's
+        # FFmpegExtractAudio postprocessor, so simulate the produced MP3
         mock_ydl = Mock()
-        mock_ydl.extract_info.return_value = mock_yt_dlp_info
+
+        def fake_extract(url, download=True):
+            (tmp_path / "Test_Video.mp3").write_bytes(b"fake mp3 audio data")
+            return mock_yt_dlp_info
+
+        mock_ydl.extract_info.side_effect = fake_extract
         mock_ydl.__enter__ = Mock(return_value=mock_ydl)
         mock_ydl.__exit__ = Mock(return_value=False)
         mocker.patch("yodle.YoutubeDL", return_value=mock_ydl)
 
-        # Create fake M4A file
-        m4a_path = tmp_path / "Test_Video.m4a"
-        m4a_path.write_bytes(b"fake m4a audio data")
+        # Avoid network call for album art
+        mocker.patch.object(MusicDownloader, "_save_thumbnail_png")
 
-        # Mock audio conversion
-        mock_audio = Mock()
-        mocker.patch("yodle.AudioSegment.from_file", return_value=mock_audio)
-
-        # Mock mutagen
-        mocker.patch("yodle.MUTAGEN_AVAILABLE", True)
-        mock_mp3 = Mock()
+        # Mock mutagen tagging (MagicMock supports item assignment for frames)
+        mock_mp3 = MagicMock()
         mocker.patch("yodle.MP3", return_value=mock_mp3)
 
         # Execute download
@@ -160,28 +161,26 @@ class TestMusicPipeline:
 
         # Verify pipeline executed
         assert result.success is True
-        mock_audio.export.assert_called_once()  # Conversion happened
-        mock_mp3.save.assert_called_once()      # Tags saved
+        assert result.output_path.endswith(".mp3")
+        mock_mp3.save.assert_called_once()  # Tags saved
 
-    def test_music_download_without_mutagen(self, tmp_path, mocker, mock_yt_dlp_info):
-        """Test music download works without mutagen (no ID3 tags)."""
-        # Mock yt-dlp
+    def test_music_download_survives_tagging_failure(self, tmp_path, mocker, mock_yt_dlp_info):
+        """Test music download still succeeds if ID3 tagging blows up."""
         mock_ydl = Mock()
-        mock_ydl.extract_info.return_value = mock_yt_dlp_info
+
+        def fake_extract(url, download=True):
+            (tmp_path / "Test_Video.mp3").write_bytes(b"fake mp3")
+            return mock_yt_dlp_info
+
+        mock_ydl.extract_info.side_effect = fake_extract
         mock_ydl.__enter__ = Mock(return_value=mock_ydl)
         mock_ydl.__exit__ = Mock(return_value=False)
         mocker.patch("yodle.YoutubeDL", return_value=mock_ydl)
 
-        # Create M4A file
-        m4a_path = tmp_path / "Test_Video.m4a"
-        m4a_path.write_bytes(b"fake m4a")
+        mocker.patch.object(MusicDownloader, "_save_thumbnail_png")
 
-        # Mock conversion
-        mock_audio = Mock()
-        mocker.patch("yodle.AudioSegment.from_file", return_value=mock_audio)
-
-        # Mutagen not available
-        mocker.patch("yodle.MUTAGEN_AVAILABLE", False)
+        # Tagging raises — _embed_id3_tags must swallow it
+        mocker.patch("yodle.MP3", side_effect=Exception("no ID3 header"))
 
         # Execute
         downloader = MusicDownloader()
@@ -189,7 +188,7 @@ class TestMusicPipeline:
 
         # Should still succeed without tagging
         assert result.success is True
-        mock_audio.export.assert_called_once()
+        assert result.output_path.endswith(".mp3")
 
 
 class TestDownloadManager:
@@ -380,3 +379,63 @@ class TestRealDownload:
         mp3_files = list(tmp_path.glob("*.mp3"))
         assert len(mp3_files) > 0
         assert mp3_files[0].stat().st_size > 0
+
+
+class TestLimitOpts:
+    """Tests for --limit download-range opts injection."""
+
+    def test_video_no_limit_omits_range_opts(self, tmp_path):
+        """Without limit_seconds, no download-range opts are set."""
+        opts = VideoDownloader()._get_opts(tmp_path)
+        assert "download_ranges" not in opts
+        assert "force_keyframes_at_cuts" not in opts
+
+    def test_music_no_limit_omits_range_opts(self, tmp_path):
+        """Without limit_seconds, no download-range opts are set."""
+        opts = MusicDownloader()._get_opts(tmp_path)
+        assert "download_ranges" not in opts
+        assert "force_keyframes_at_cuts" not in opts
+
+    def test_video_with_limit_sets_range_opts(self, tmp_path):
+        """With limit_seconds, download_ranges covers 0..limit with forced keyframes."""
+        opts = VideoDownloader(limit_seconds=60)._get_opts(tmp_path)
+        assert opts["force_keyframes_at_cuts"] is True
+        assert callable(opts["download_ranges"])
+        assert list(opts["download_ranges"]({"id": "x"}, Mock())) == [
+            {"start_time": 0, "end_time": 60}
+        ]
+        # Existing opts survive injection
+        assert opts["format"] == VideoDownloader.FORMAT_STRING
+        assert opts["merge_output_format"] == "mp4"
+        assert opts["postprocessors"] == [{"key": "FFmpegMetadata"}]
+
+    def test_music_with_limit_sets_range_opts(self, tmp_path):
+        """Music opts get the range keys and keep audio postprocessors."""
+        opts = MusicDownloader(limit_seconds=90)._get_opts(tmp_path)
+        assert opts["force_keyframes_at_cuts"] is True
+        assert list(opts["download_ranges"]({"id": "x"}, Mock())) == [
+            {"start_time": 0, "end_time": 90}
+        ]
+        pp_keys = [pp["key"] for pp in opts["postprocessors"]]
+        assert "FFmpegExtractAudio" in pp_keys
+
+    def test_download_manager_forwards_limit(self, tmp_path):
+        """DownloadManager forwards limit_seconds to both downloaders."""
+        manager = DownloadManager(tmp_path, limit_seconds=45)
+        assert manager.video_downloader.limit_seconds == 45
+        assert manager.music_downloader.limit_seconds == 45
+
+    def test_download_manager_default_limit_is_none(self, tmp_path):
+        """Default DownloadManager leaves limit unset."""
+        manager = DownloadManager(tmp_path)
+        assert manager.video_downloader.limit_seconds is None
+        assert manager.music_downloader.limit_seconds is None
+
+    def test_apply_limit_opts_helper(self):
+        """Helper is a no-op for None and injects for a value."""
+        assert _apply_limit_opts({"a": 1}, None) == {"a": 1}
+        opts = _apply_limit_opts({"a": 1}, 30)
+        assert opts["force_keyframes_at_cuts"] is True
+        assert list(opts["download_ranges"]({"id": "x"}, Mock())) == [
+            {"start_time": 0, "end_time": 30}
+        ]
