@@ -24,4 +24,4 @@ mutagen>=1.47.0
 pydub>=0.25.1
 pillow>=10.0.0
 requests>=2.31.0
-browsercookie>=0.7.7
+browser-cookie3>=0.19.1
