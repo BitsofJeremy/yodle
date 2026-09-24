@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Yodle is a YouTube downloader with a GUI for downloading videos, music (MP3), and channel thumbnails. Downloads are saved to `~/Yodle` by default, or to the path set via the `YODLE_OUTPUT_DIR` environment variable.
+Yodle is a CLI YouTube downloader for downloading videos, music (MP3), and channel thumbnails. Downloads are saved to `~/Yodle` by default, or to the path set via the `YODLE_OUTPUT_DIR` environment variable.
 
 ## Quick Start
 
@@ -16,49 +16,56 @@ uv run yodle.py
 python yodle.py
 ```
 
+Running with no URLs prints help and exits.
+
 ## Requirements
 
 - Python 3.11+
 - ffmpeg (must be on system PATH): `brew install ffmpeg`
-- Dependencies (handled automatically by uv, or install manually):
+- Dependencies (managed by uv via `pyproject.toml` and `uv.lock`):
   ```bash
-  pip install yt-dlp mutagen pydub pillow requests browser-cookie3
+  pip install yt-dlp mutagen pydub pillow requests browser-cookie3 python-dotenv
   ```
 
-## yodle.py - Unified GUI Downloader
+## yodle.py - Unified CLI Downloader
 
-Single-file application using PEP 723 inline script metadata. No setup required when using uv.
+Single-file application. Dependencies live in `pyproject.toml` (managed by uv); there is no PEP 723 inline metadata. The console script `yodle` is also exposed via `pyproject.toml`.
 
 ### Features
 - **Video**: Downloads in best H.264/HEVC quality
 - **Music**: Downloads as MP3 with embedded ID3 tags and album art
 - **Both**: Downloads video and music versions
 - **Thumbnails**: Downloads all thumbnails from a YouTube channel (original + resized)
+- **Time limits**: `--limit DURATION` truncates each download (e.g. `--limit 59m`)
 
-### GUI Components
-- URL input (supports multiple URLs, one per line)
-- Download type selector: Video / Music / Both / Thumbnails
-- Browser cookie extraction: None / Chrome / Firefox / Custom file...
-- Progress bar with percentage
-- Status log with timestamps
+### CLI Flags
 
-### Auto-Update
-Checks for yt-dlp updates at startup and displays a notification banner if outdated.
+| Flag | Values | Default | Purpose |
+|------|--------|---------|---------|
+| `urls` | one or more YouTube URLs | — (required to run) | What to download |
+| `-t, --type` | `video`, `music`, `both`, `thumbnails` | `both` | Download type |
+| `--video-format` | `mp4`, `mkv`, `webm` | `mp4` | Video container |
+| `--audio-format` | `mp3`, `m4a` | `mp3` | Audio format |
+| `--limit` | `90`, `90s`, `59m`, `2h`, `1:30:00` | unset (full download) | Max duration per video; no-op with `-t thumbnails` |
+| `-b, --browser` | `none`, `chrome`, `firefox` | unset | Extract browser cookies for private/age-restricted videos |
+| `--cookies-file` | path | unset | Use an existing Netscape cookies.txt |
+
+Environment: `YODLE_OUTPUT_DIR` (also loadable from a project-root `.env`) sets the output directory.
 
 ## Architecture
 
 ### Key Classes in yodle.py
 - `CookieManager`: Extracts cookies from Chrome/Firefox to `~/.config/yt-dlp/cookies.txt`
-- `UpdateChecker`: Queries PyPI for yt-dlp updates
+- `UpdateChecker`: Queries PyPI for yt-dlp updates (currently unused by the CLI — dead code left in place)
 - `VideoDownloader`: Downloads video with FFmpegMetadata post-processor
-- `MusicDownloader`: Downloads M4A, converts to MP3, embeds ID3 tags with mutagen
+- `MusicDownloader`: Downloads bestaudio, converts via yt-dlp FFmpegExtractAudio, embeds ID3 tags with mutagen
 - `ThumbnailDownloader`: Async downloads of channel thumbnails with resize
 - `DownloadManager`: Orchestrates all download types, handles playlists
-- `YodleGUI`: Tkinter GUI with threading for non-blocking downloads
+- `run_download()` / `main()`: argparse CLI entry points
 
 ### Technical Details
-- **Player client**: Uses Android client to avoid 403 errors
-- **Threading**: GUI runs on main thread; downloads run on worker thread with queue-based communication
+- **Player client workaround**: `YDL_COMMON_OPTS` uses `extractor_args: {"youtube": {"player_client": ["web", "android"]}}` plus `remote_components: ["ejs:github"]` — the EJS challenge solver is fetched at runtime (needs Deno) to work around YouTube signature/`n`-parameter challenges that cause 403 errors.
+- **Time limits**: `--limit` is parsed by `parse_duration()` and injected as yt-dlp `download_ranges` + `force_keyframes_at_cuts` opts, so only the requested range is fetched and ffmpeg re-encodes at the cut point.
 - **Playlists**: Detected by `playlist` or `list=` in URL; auto-expands to individual videos
 - **Channels**: Detected by `/@`, `/channel/`, `/c/`, or `/user/` in URL
 
@@ -91,6 +98,14 @@ uv run yodle.py
 ```
 
 **Note**: Thumbnails are automatically downloaded and saved as PNG files alongside video and music downloads. Music files also have thumbnails embedded in ID3 tags for music player compatibility.
+
+## Tests
+
+```bash
+uv run --with-requirements requirements-test.txt pytest
+```
+
+The suite lives in `tests/` (pytest, config in `pytest.ini`). Network-dependent smoke tests are marked and skipped by default.
 
 ## Legacy CLI Scripts (in archive/)
 
@@ -127,15 +142,13 @@ ffmpeg -version
 **Solution**:
 - Close all browser instances completely before extraction
 - Try the alternative browser (Chrome vs Firefox)
-- Use "Custom file..." to point to an existing cookies.txt file
-- For public videos, use "None" option
+- Use `--cookies-file` to point to an existing cookies.txt file
+- For public videos, omit `-b` (or use `-b none`)
 
 ### Using custom cookies file
 **To use an existing cookies.txt file**:
-1. Select "Custom file..." from the Browser Cookies dropdown
-2. Navigate to your cookies.txt file (Netscape format)
-3. File path will be displayed (e.g., "Custom: cookies.txt")
-4. Downloads will use this file for authentication
+1. Pass `--cookies-file /path/to/cookies.txt` (Netscape format)
+2. Downloads will use this file for authentication
 
 **Common locations**:
 - `~/.config/yt-dlp/cookies.txt` (default yt-dlp location)
@@ -143,7 +156,7 @@ ffmpeg -version
 
 ### Private/age-restricted videos fail
 **Solution**:
-1. Select your browser in "Browser Cookies" dropdown
+1. Pass `-b chrome` or `-b firefox`
 2. Ensure you're logged into YouTube in that browser
 3. Close browser completely before downloading
 
@@ -156,7 +169,7 @@ ffmpeg -version
 
 ## Important Notes
 
-- Quote URLs in zsh: `uv run yodle.py` then paste URL in GUI
-- For private/age-restricted videos, select your browser for cookie extraction
+- Quote URLs in zsh: `uv run yodle.py 'https://youtube.com/watch?v=...'`
+- For private/age-restricted videos, select your browser with `-b`
 - Channel thumbnail mode expects a channel URL (e.g., `https://youtube.com/@channelname`)
 - Downloads saved to: `~/Yodle/` by default, or to `$YODLE_OUTPUT_DIR` if set

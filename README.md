@@ -1,6 +1,6 @@
 # Yodle - YouTube Downloader
 
-A powerful, all-in-one YouTube downloader CLI interfaces.
+A powerful, all-in-one YouTube downloader CLI.
 
 Download videos, music, and channel thumbnails with ease. Built with Python and optimized for simplicity and reliability.
 
@@ -27,6 +27,16 @@ Download videos, music, and channel thumbnails with ease. Built with Python and 
 ---
 
 ## Recent Updates
+
+### Download Time Limit (`--limit`)
+
+Truncate each download to at most a given duration — for example, only the first 59 minutes of a long video:
+
+```bash
+uv run yodle -t video --limit 59m 'https://youtube.com/watch?v=...'
+```
+
+Accepted forms: plain seconds (`90`), unit suffix (`90s`, `59m`, `2h`), or clock form (`1:30:00`, zero-padded). No flag means a full download. The cut is frame-accurate: yt-dlp downloads only the requested range and re-encodes at the cut point. With `-t thumbnails` the flag is ignored.
 
 ### Configurable Output Directory
 
@@ -69,6 +79,7 @@ The default output directory has changed from `~/Downloads/Yodle` to `~/Yodle`. 
 - **Channel Thumbnails**: Batch download all thumbnails from a YouTube channel with original and resized versions
 - **Playlist Support**: Automatically detect and expand playlists into individual downloads
 - **Format Selection**: Choose output format for both video and audio
+- **Time Limits**: Download only the first N seconds of each video with `--limit`
 
 ### Quality of Life
 
@@ -84,15 +95,6 @@ The default output directory has changed from `~/Downloads/Yodle` to `~/Yodle`. 
 
 ## Quick Start
 
-### GUI Mode (Recommended)
-
-```bash
-# Run the GUI
-uv run yodle
-```
-
-### CLI Mode
-
 ```bash
 # Download a single video
 uv run yodle 'https://youtube.com/watch?v=dQw4w9WgXcQ'
@@ -102,6 +104,9 @@ uv run yodle -t music 'https://youtube.com/watch?v=dQw4w9WgXcQ'
 
 # Download in different formats
 uv run yodle -t both --video-format mkv --audio-format m4a 'URL'
+
+# Only the first 59 minutes
+uv run yodle -t video --limit 59m 'URL'
 
 # Multiple URLs
 uv run yodle -t music 'URL1' 'URL2' 'URL3'
@@ -262,7 +267,7 @@ uv run yodle -t both -b chrome --video-format mkv --audio-format m4a 'URL1' 'URL
 urls                  YouTube URL(s) to download (one or more)
 ```
 
-**Note:** If no URLs are provided, Yodle launches in GUI mode instead.
+**Note:** If no URLs are provided, Yodle prints help and exits.
 
 ### Options
 
@@ -309,6 +314,34 @@ Output format for audio downloads.
 ```bash
 uv run yodle --audio-format m4a 'URL'
 uv run yodle -t music --audio-format m4a 'URL'
+```
+
+#### `--limit DURATION`
+
+Download at most DURATION per video, starting from the beginning.
+
+Accepted forms:
+
+| Form | Example | Meaning |
+|------|---------|---------|
+| Plain seconds | `90` | 90 seconds |
+| Unit suffix | `90s`, `59m`, `2h` | seconds / minutes / hours |
+| Clock form | `1:30:00` | H:MM:SS (minutes and seconds must be zero-padded) |
+
+**Default:** not set (full download)
+
+**Notes:**
+- The value must be positive; `0` and negatives are rejected.
+- MM:SS alone (e.g. `1:30`) is not accepted — use `90s` or `1:00:30`.
+- Only the first DURATION of each video is fetched (bandwidth scales with the limit), and ffmpeg re-encodes at the cut point for a frame-accurate boundary.
+- With playlists, the limit applies to each video individually.
+- No-op with `-t thumbnails`.
+
+**Examples:**
+```bash
+uv run yodle --limit 90s 'URL'
+uv run yodle -t video --limit 59m 'URL'
+uv run yodle -t music --limit 1:30:00 'URL'
 ```
 
 #### `-b, --browser {none,chrome,firefox}`
@@ -389,10 +422,7 @@ This is the standard yt-dlp cookies location and is automatically used for subse
 
 ### Logging
 
-Yodle outputs logs to:
-
-- **GUI Mode**: Status Log widget in the application
-- **CLI Mode**: Standard output (stdout)
+Yodle outputs logs to standard output (stdout).
 
 **Log Level:** INFO (shows important operations and progress)
 
@@ -469,17 +499,7 @@ Orchestrates all download operations and coordinates components.
 - Provides progress and logging callbacks
 - Supports batch operations (multiple URLs)
 
-#### `YodleGUI`
-Tkinter-based graphical user interface.
-
-- Non-blocking downloads via threading
-- Queue-based message passing between threads
-- Real-time progress updates
-- Timestamped status logging with update notifications
-- Browser and format selection dropdowns
-- Auto-extracting cookies on selection
-
-#### `run_cli_download()`
+#### `main()` / `run_download()`
 Command-line interface entry point for scripting and automation.
 
 - Argument parsing and validation
@@ -493,7 +513,7 @@ Command-line interface entry point for scripting and automation.
 ```
 User Input
     ↓
-Main Entry Point (GUI or CLI)
+Main Entry Point (CLI)
     ↓
 Argument/Option Parsing
     ↓
@@ -620,12 +640,10 @@ After installation, restart Yodle.
 
 3. **Use a custom cookies file** instead:
    - Export cookies using a browser extension (e.g., "Get cookies.txt" extension)
-   - Select "Custom file..." from the Browser Cookies dropdown
-   - Navigate to your exported cookies.txt file
+   - Run with `--cookies-file /path/to/cookies.txt`
 
 4. **For public videos, skip authentication**:
-   - Select "None" from Browser Cookies dropdown
-   - Proceed with download
+   - Omit `-b` / `--browser` (or pass `-b none`)
 
 ---
 
@@ -643,12 +661,12 @@ After installation, restart Yodle.
 1. **Extract browser cookies:**
    - Ensure you're logged into YouTube in your browser
    - Close the browser completely
-   - In Yodle, select your browser from the "Browser Cookies" dropdown
+   - Run Yodle with `-b chrome` or `-b firefox`
    - The cookies will be extracted and used for authentication
 
 2. **Use custom cookies:**
    - Export your cookies using a browser extension
-   - Select "Custom file..." and point to the exported file
+   - Run with `--cookies-file /path/to/cookies.txt`
    - Try the download again
 
 3. **Check your YouTube account:**
@@ -706,15 +724,7 @@ After installation, restart Yodle.
 
 4. **Use browser cookies for restricted channels:**
    - If you're a member or have special access, extract your browser cookies
-   - Select your browser from the dropdown before downloading
-
----
-
-### GUI Doesn't Respond During Download
-
-**This is expected behavior.** The GUI is responsive only when not downloading. This prevents UI freezing.
-
-The status log continues to update in real-time, showing download progress. Wait for the completion message.
+   - Run with `-b chrome` or `-b firefox`
 
 ---
 
@@ -787,13 +797,6 @@ Yodle can automatically extract cookies from your web browser for downloading pr
 
 #### Usage
 
-**GUI:**
-1. Go to "Browser Cookies" dropdown
-2. Select your browser (Chrome or Firefox)
-3. Yodle extracts cookies automatically
-4. Proceed with download
-
-**CLI:**
 ```bash
 uv run yodle -b chrome 'URL'
 uv run yodle --browser firefox 'URL'
@@ -817,14 +820,6 @@ If you prefer not to grant Yodle access to your browser, use an exported cookies
 
 #### Usage
 
-**GUI:**
-1. Go to "Browser Cookies" dropdown
-2. Select "Custom file..."
-3. Navigate to your cookies.txt file
-4. Label updates to show "Custom: filename.txt"
-5. Proceed with download
-
-**CLI:**
 ```bash
 uv run yodle --cookies-file ~/Downloads/cookies.txt 'URL'
 ```
@@ -907,20 +902,6 @@ The log shows progress through the playlist:
 
 Download multiple videos/playlists in a single operation.
 
-#### GUI Method
-
-Paste multiple URLs in the URL input box, one per line:
-
-```
-https://youtube.com/watch?v=xxx
-https://youtube.com/watch?v=yyy
-https://youtube.com/playlist?list=PLzzz
-```
-
-Click "DOWNLOAD" once - all URLs process in order.
-
-#### CLI Method
-
 Pass multiple URLs as arguments:
 
 ```bash
@@ -932,7 +913,7 @@ uv run yodle -t music \
 
 #### Progress Tracking
 
-Each URL processes sequentially. The status log shows which URL is being processed and progress.
+Each URL processes sequentially. The terminal output shows which URL is being processed and progress.
 
 ---
 
@@ -1047,7 +1028,7 @@ Choose formats based on your needs:
 - **Current Version**: 1.0.0
 - **Python Requirement**: 3.11+
 - **License**: See LICENSE file
-- **Dependencies**: yt-dlp, mutagen, pydub, pillow, requests, browser-cookie3
+- **Dependencies**: yt-dlp, mutagen, pydub, pillow, requests, browser-cookie3, python-dotenv
 
 ---
 
@@ -1061,7 +1042,7 @@ Found an issue? Have a feature request? Open an issue or submit a pull request o
 
 For help:
 1. Check the [Troubleshooting](#troubleshooting) section above
-2. Review the status log for error messages
+2. Review the terminal output for error messages
 3. Check your system setup (ffmpeg, Python version, dependencies)
 4. Try with a different video (to isolate the issue)
 

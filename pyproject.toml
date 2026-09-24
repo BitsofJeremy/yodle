@@ -1,7 +1,7 @@
 [project]
 name = "yodle"
 version = "1.0.0"
-description = "Unified YouTube Downloader with GUI and CLI"
+description = "YouTube download CLI"
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
 dependencies = [
