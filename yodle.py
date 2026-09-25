@@ -28,10 +28,12 @@ import functools
 import json
 import logging
 import os
+import random
 import re
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -76,6 +78,14 @@ YDL_COMMON_OPTS = {
 LOUDNORM_I = "-14"    # target integrated loudness (LUFS; streaming standard)
 LOUDNORM_TP = "-1.5"  # true-peak ceiling (dBTP)
 LOUDNORM_LRA = "11"   # target loudness range (LU)
+
+# Random pause between batch downloads (seconds). Back-to-back fetches look
+# scripted and trip YouTube's risk-flagging ("request was rejected because it
+# was considered high risk" -> HTTP 403), so each fetch after the first waits
+# uniform-randomly in this range (1-15 min — long enough for unattended
+# overnight batches; a 25-video run averages ~3h of pacing).
+PAUSE_MIN_SECONDS = 60
+PAUSE_MAX_SECONDS = 900
 
 # Logging setup
 logging.basicConfig(
@@ -1004,6 +1014,15 @@ class DownloadManager:
             self.log_callback(message)
         logger.info(message)
 
+    def _pause_between_downloads(self) -> None:
+        """Sleep a random 60-900s so consecutive fetches don't look scripted."""
+        delay = random.randint(PAUSE_MIN_SECONDS, PAUSE_MAX_SECONDS)
+        self._log(
+            f"Pausing {delay}s before the next download "
+            "(batch pacing to avoid YouTube risk-flagging)..."
+        )
+        time.sleep(delay)
+
     def _get_playlist_info(self, url: str) -> Tuple[str, List[dict]]:
         """Extract playlist info and video list."""
         ydl_opts = {
@@ -1038,6 +1057,14 @@ class DownloadManager:
         """
         results = []
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        downloads_made = 0
+
+        def paced_fetch() -> None:
+            """Gate every YouTube fetch behind a random pause except the first."""
+            nonlocal downloads_made
+            if downloads_made:
+                self._pause_between_downloads()
+            downloads_made += 1
 
         for url in urls:
             url = url.strip()
@@ -1059,6 +1086,7 @@ class DownloadManager:
                     )
                     continue
 
+                paced_fetch()
                 result = self.thumbnail_downloader.download(url, self.output_dir)
                 results.append(result)
 
@@ -1071,6 +1099,7 @@ class DownloadManager:
 
                     for i, video in enumerate(videos, 1):
                         self._log(f"[{i}/{len(videos)}] {video['title']}")
+                        paced_fetch()
                         video_results = self._download_single(
                             video["url"], download_type, playlist_dir
                         )
@@ -1087,6 +1116,7 @@ class DownloadManager:
                         )
                     )
             else:
+                paced_fetch()
                 video_results = self._download_single(
                     url, download_type, self.output_dir
                 )

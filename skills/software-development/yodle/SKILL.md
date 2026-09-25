@@ -102,6 +102,10 @@ YODLE_OUTPUT_DIR=/tmp/out uv run yodle -t video 'URL'     # override output dir
   Technical Details before touching `MusicDownloader`.
 - **`--limit` on music must not set `force_keyframes_at_cuts`** — it would
   drop `-c copy` and double-transcode. Video keeps it for frame-accurate cuts.
+- **Batch runs pause 1–15 min between downloads by design** (YouTube risk-flag
+  avoidance, logged as "Pausing Ns before the next download"). Don't treat a
+  long multi-URL run as a hang, and don't remove `PAUSE_MIN_SECONDS` /
+  `PAUSE_MAX_SECONDS` in `yodle.py`.
 - `tests/skills/test_yodle_skill.py` validates this skill file; frontmatter
   description must stay ≤60 chars ending in a period.
 

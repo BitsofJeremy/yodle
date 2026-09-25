@@ -272,6 +272,8 @@ class TestDownloadManager:
             )
 
         mocker.patch.object(manager.video_downloader, 'download', side_effect=mock_download)
+        # Batch pacing sleeps for real between fetches (covered by TestBatchPause)
+        mocker.patch("time.sleep")
 
         # Execute with multiple URLs
         urls = [
@@ -733,3 +735,97 @@ class TestBatchFile:
             run_download(args)
 
         assert manager.download.call_args[0][0] == ["https://youtube.com/watch?v=aaa"]
+
+
+class TestBatchPause:
+    """Batch downloads pause a random 60-900s between fetches.
+
+    Rapid back-to-back video downloads trip YouTube's risk-flagging
+    ("request was rejected because it was considered high risk" -> HTTP 403).
+    Every fetch after the first waits random.randint(60, 900) seconds;
+    skipped URLs never count as a fetch.
+    """
+
+    def _make_manager(self, tmp_path, mocker):
+        """DownloadManager whose fetches are recorded instead of executed."""
+        manager = DownloadManager(tmp_path)
+        events = []
+
+        def fake_download_single(url, dl_type, output_dir):
+            events.append(("download", url))
+            return [DownloadResult(success=True, url=url, download_type=dl_type)]
+
+        def fake_randint(a, b):
+            events.append(("randint", a, b))
+            return 42
+
+        def fake_sleep(delay):
+            events.append(("sleep", delay))
+
+        mocker.patch.object(manager, "_download_single", side_effect=fake_download_single)
+        mocker.patch("random.randint", side_effect=fake_randint)
+        mocker.patch("time.sleep", side_effect=fake_sleep)
+        return manager, events
+
+    def test_pause_between_multiple_downloads(self, tmp_path, mocker):
+        """Second fetch waits randint(60, 900); no pause before the first."""
+        manager, events = self._make_manager(tmp_path, mocker)
+
+        manager.download(
+            ["https://youtube.com/watch?v=aaa", "https://youtube.com/watch?v=bbb"],
+            "video",
+        )
+
+        assert events == [
+            ("download", "https://youtube.com/watch?v=aaa"),
+            ("randint", 60, 900),
+            ("sleep", 42),
+            ("download", "https://youtube.com/watch?v=bbb"),
+        ]
+
+    def test_single_download_has_no_pause(self, tmp_path, mocker):
+        """One URL: nothing to space out — never sleeps."""
+        manager, events = self._make_manager(tmp_path, mocker)
+
+        manager.download(["https://youtube.com/watch?v=aaa"], "video")
+
+        assert [e for e in events if e[0] in ("sleep", "randint")] == []
+
+    def test_playlist_pauses_between_entries(self, tmp_path, mocker):
+        """Playlist videos are also paced: n entries -> n-1 pauses."""
+        manager, events = self._make_manager(tmp_path, mocker)
+        mocker.patch("yodle.is_playlist", return_value=True)
+        mocker.patch.object(
+            manager,
+            "_get_playlist_info",
+            return_value=("My_Playlist", [
+                {"url": "https://youtube.com/watch?v=1", "title": "Video 1"},
+                {"url": "https://youtube.com/watch?v=2", "title": "Video 2"},
+                {"url": "https://youtube.com/watch?v=3", "title": "Video 3"},
+            ]),
+        )
+
+        manager.download(["https://youtube.com/playlist?list=PLxxx"], "video")
+
+        kinds = [e[0] for e in events]
+        assert kinds == [
+            "download", "randint", "sleep",
+            "download", "randint", "sleep",
+            "download",
+        ]
+
+    def test_skipped_urls_do_not_pause(self, tmp_path, mocker):
+        """A skipped non-channel URL isn't a fetch — no pause before/after it."""
+        manager = DownloadManager(tmp_path)
+        mocker.patch("yodle.is_channel", side_effect=[False, True])
+        thumb = mocker.patch.object(manager.thumbnail_downloader, "download")
+        sleep_mock = mocker.patch("time.sleep")
+        mocker.patch("random.randint")
+
+        manager.download(
+            ["https://youtube.com/watch?v=notachannel", "https://youtube.com/@somechannel"],
+            "thumbnails",
+        )
+
+        thumb.assert_called_once_with("https://youtube.com/@somechannel", manager.output_dir)
+        sleep_mock.assert_not_called()

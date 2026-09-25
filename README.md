@@ -28,6 +28,14 @@ Download videos, music, and channel thumbnails with ease. Built with Python and 
 
 ## Recent Updates
 
+### Batch Download Pacing
+
+Multi-download runs (batch files, multiple URLs, playlists) now pause a random 1 to 15 minutes between each video, so back-to-back fetches don't trip YouTube's risk-flagging (the "request was rejected because it was considered high risk" 403s). The wait is logged before each pause; single-URL downloads are unaffected.
+
+```bash
+uv run yodle -t music -a mylist.txt   # spaces videos 1–15 min apart automatically
+```
+
 ### Batch File Input (`-a, --batch-file`)
 
 Load URLs from a text file — one per line, `#` starts a comment, blank lines are skipped. File entries are combined with any URLs given on the command line, and playlist URLs in the file still auto-expand:
@@ -296,6 +304,8 @@ urls                  YouTube URL(s) to download (one or more)
 #### `-a, --batch-file FILE`
 
 Read additional URLs from a text file, one per line. Blank lines and lines starting with `#` are skipped; surrounding whitespace and Windows line endings are handled. File URLs are combined with any positional `urls` (file entries come after inline URLs), and playlist URLs inside the file auto-expand as usual.
+
+Downloads within a batch are paced: each video after the first waits a random 1 to 15 minutes (see [Batch URL Processing](#batch-url-processing)).
 
 **Examples:**
 ```bash
@@ -985,6 +995,16 @@ uv run yodle -t music \
 #### Progress Tracking
 
 Each URL processes sequentially. The terminal output shows which URL is being processed and progress.
+
+#### Download Pacing
+
+Every download after the first — across batch files, multiple URLs, and playlist entries — sleeps a random 1 to 15 minutes first. Rapid back-to-back fetches look scripted and can trigger YouTube's risk-flagging (HTTP 403 with "request was rejected because it was considered high risk"). Each wait is announced in the log:
+
+```
+[14:24:15] Pausing 173s before the next download (batch pacing to avoid YouTube risk-flagging)...
+```
+
+Single-URL downloads never pause. Skipped entries (e.g. non-channel URLs in `-t thumbnails`) don't count as downloads.
 
 ---
 

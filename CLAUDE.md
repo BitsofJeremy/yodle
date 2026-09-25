@@ -37,6 +37,7 @@ Single-file application. Dependencies live in `pyproject.toml` (managed by uv); 
 - **Both**: Downloads video and music versions
 - **Thumbnails**: Downloads all thumbnails from a YouTube channel (original + resized)
 - **Time limits**: `--limit DURATION` truncates each download (e.g. `--limit 59m`)
+- **Batch pacing**: random 1–15 min pause between downloads in multi-download runs (batches, playlists)
 
 ### CLI Flags
 
@@ -72,6 +73,7 @@ Environment: `YODLE_OUTPUT_DIR` (also loadable from a project-root `.env`) sets 
 - **Music quality**: `FFmpegExtractAudio` gets `preferredquality` from `--audio-quality` (default `0` = best VBR). Optional `--normalize` runs a Yodle-side two-pass ffmpeg `loudnorm` pass (-14 LUFS, linear mode) after download, before ID3 tagging. m4a `postprocessor_args` must stay dict-form scoped to `embedthumbnail+ffmpeg` — list-form args leak into every ffmpeg postprocessor and break stream copies. For m4a, `FFmpegMetadata` must run **before** `EmbedThumbnail`: the metadata pass's `-vn` would otherwise drop the cover art (mp3 order is the reverse and stays that way).
 - **Playlists**: Detected by `playlist` or `list=` in URL; auto-expands to individual videos
 - **Channels**: Detected by `/@`, `/channel/`, `/c/`, or `/user/` in URL
+- **Batch pacing**: `DownloadManager.download()` gates every fetch after the first behind `_pause_between_downloads()` — `random.randint(PAUSE_MIN_SECONDS, PAUSE_MAX_SECONDS)` (60–900s = 1–15 min) + `time.sleep`. Applies across batch files, multiple URLs, and playlist entries; skipped URLs don't count. This keeps back-to-back requests from tripping YouTube's risk-flagging (403 "high risk"). Tests patch `time.sleep`/`random.randint` — any test driving 2+ fetches through a real `DownloadManager` must patch `time.sleep` too.
 
 ## Output Structure
 
