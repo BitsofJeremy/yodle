@@ -409,10 +409,14 @@ class TestLimitOpts:
         assert opts["merge_output_format"] == "mp4"
         assert opts["postprocessors"] == [{"key": "FFmpegMetadata"}]
 
-    def test_music_with_limit_sets_range_opts(self, tmp_path):
-        """Music opts get the range keys and keep audio postprocessors."""
+    def test_music_with_limit_sets_range_opts_without_keyframes(self, tmp_path):
+        """Music gets the range opts but MUST NOT force keyframes.
+
+        force_keyframes_at_cuts makes yt-dlp's ranged FFmpeg download omit
+        '-c copy', causing a double lossy transcode (download + ExtractAudio).
+        """
         opts = MusicDownloader(limit_seconds=90)._get_opts(tmp_path)
-        assert opts["force_keyframes_at_cuts"] is True
+        assert "force_keyframes_at_cuts" not in opts
         assert list(opts["download_ranges"]({"id": "x"}, Mock())) == [
             {"start_time": 0, "end_time": 90}
         ]
@@ -439,3 +443,179 @@ class TestLimitOpts:
         assert list(opts["download_ranges"]({"id": "x"}, Mock())) == [
             {"start_time": 0, "end_time": 30}
         ]
+
+    def test_apply_limit_opts_without_keyframes(self):
+        """force_keyframes=False injects ranges but skips the keyframe opt."""
+        opts = _apply_limit_opts({"a": 1}, 30, force_keyframes=False)
+        assert "force_keyframes_at_cuts" not in opts
+        assert list(opts["download_ranges"]({"id": "x"}, Mock())) == [
+            {"start_time": 0, "end_time": 30}
+        ]
+
+
+class TestAudioQualityOpts:
+    """Tests for --audio-quality plumbing into yt-dlp opts."""
+
+    def test_default_quality_is_vbr_best(self, tmp_path):
+        """Default opts request preferredquality '0' (VBR 0 = best) for mp3."""
+        opts = MusicDownloader()._get_opts(tmp_path)
+        extract = opts["postprocessors"][0]
+        assert extract["key"] == "FFmpegExtractAudio"
+        assert extract["preferredcodec"] == "mp3"
+        assert extract["preferredquality"] == "0"
+
+    def test_explicit_bitrate_forwarded(self, tmp_path):
+        """audio_quality=320 reaches preferredquality for m4a too."""
+        opts = MusicDownloader(audio_quality=320, output_format="m4a")._get_opts(tmp_path)
+        extract = opts["postprocessors"][0]
+        assert extract["preferredcodec"] == "m4a"
+        assert extract["preferredquality"] == "320"
+
+    def test_mp3_branch_has_no_postprocessor_args(self, tmp_path):
+        """mp3 opts must not carry postprocessor_args."""
+        opts = MusicDownloader()._get_opts(tmp_path)
+        assert "postprocessor_args" not in opts
+
+    def test_m4a_postprocessor_args_scoped_to_embed_thumbnail(self, tmp_path):
+        """m4a cover-art args are dict-form, scoped, and contain no -c:a."""
+        opts = MusicDownloader(output_format="m4a")._get_opts(tmp_path)
+        ppa = opts["postprocessor_args"]
+        assert isinstance(ppa, dict)
+        assert set(ppa) == {"embedthumbnail+ffmpeg"}
+        values = ppa["embedthumbnail+ffmpeg"]
+        assert "-c:a" not in values
+        assert "title=Album Cover" in values
+
+    def test_m4a_metadata_runs_before_thumbnail_embed(self, tmp_path):
+        """FFmpegMetadata must run before EmbedThumbnail for m4a.
+
+        FFmpegMetadata's m4a output args include '-vn', which drops the
+        cover that EmbedThumbnail writes (mutagen 'covr' atom). Metadata
+        must write first so the cover can be embedded last and survive.
+        """
+        opts = MusicDownloader(output_format="m4a")._get_opts(tmp_path)
+        keys = [pp["key"] for pp in opts["postprocessors"]]
+        assert keys.index("FFmpegMetadata") < keys.index("EmbedThumbnail")
+
+    def test_mp3_metadata_still_runs_after_thumbnail_embed(self, tmp_path):
+        """mp3 order is unchanged: APIC survives FFmpegMetadata there."""
+        opts = MusicDownloader()._get_opts(tmp_path)
+        keys = [pp["key"] for pp in opts["postprocessors"]]
+        assert keys.index("EmbedThumbnail") < keys.index("FFmpegMetadata")
+
+    def test_format_prefers_opus_source(self, tmp_path):
+        """Explicit format string prefers the opus DASH audio stream."""
+        assert "acodec=opus" in MusicDownloader.FORMAT_STRING
+        opts = MusicDownloader()._get_opts(tmp_path)
+        assert opts["format"] == MusicDownloader.FORMAT_STRING
+
+    def test_download_manager_forwards_quality_and_normalize(self, tmp_path):
+        """DownloadManager forwards both new knobs; defaults preserved."""
+        manager = DownloadManager(tmp_path, audio_quality=320, normalize=True)
+        assert manager.music_downloader.audio_quality == 320
+        assert manager.music_downloader.normalize is True
+
+        default_manager = DownloadManager(tmp_path)
+        assert default_manager.music_downloader.audio_quality == 0
+        assert default_manager.music_downloader.normalize is False
+
+
+class TestNormalize:
+    """Tests for the --normalize loudness pass."""
+
+    @staticmethod
+    def _mock_pipeline(tmp_path, mocker, mock_yt_dlp_info, filename="Test_Video.mp3"):
+        """Wire the mocked yt-dlp download pipeline; return the audio path."""
+        mock_ydl = Mock()
+
+        def fake_extract(url, download=True):
+            (tmp_path / filename).write_bytes(b"fake mp3 audio data")
+            return mock_yt_dlp_info
+
+        mock_ydl.extract_info.side_effect = fake_extract
+        mock_ydl.__enter__ = Mock(return_value=mock_ydl)
+        mock_ydl.__exit__ = Mock(return_value=False)
+        mocker.patch("yodle.YoutubeDL", return_value=mock_ydl)
+        mocker.patch.object(MusicDownloader, "_save_thumbnail_png")
+        mocker.patch("yodle.MP3", return_value=MagicMock())
+        return tmp_path / filename
+
+    def test_normalize_off_by_default(self, tmp_path, mocker, mock_yt_dlp_info):
+        """Default pipeline must not run the normalization pass."""
+        audio_path = self._mock_pipeline(tmp_path, mocker, mock_yt_dlp_info)
+        spy = mocker.patch.object(MusicDownloader, "_normalize_loudness")
+
+        result = MusicDownloader().download("https://youtube.com/watch?v=abc", tmp_path)
+
+        assert result.success is True
+        spy.assert_not_called()
+        assert audio_path.exists()
+
+    def test_normalize_runs_when_enabled(self, tmp_path, mocker, mock_yt_dlp_info):
+        """normalize=True invokes the normalization pass before tagging."""
+        self._mock_pipeline(tmp_path, mocker, mock_yt_dlp_info)
+        spy = mocker.patch.object(MusicDownloader, "_normalize_loudness", return_value=True)
+
+        result = MusicDownloader(normalize=True).download(
+            "https://youtube.com/watch?v=abc", tmp_path
+        )
+
+        assert result.success is True
+        spy.assert_called_once()
+
+    def test_measurement_failure_keeps_original(self, tmp_path, mocker):
+        """OSError during measurement -> False, file bytes untouched."""
+        audio_path = tmp_path / "track.mp3"
+        audio_path.write_bytes(b"original bytes")
+        mocker.patch("yodle.subprocess.run", side_effect=OSError("ffmpeg missing"))
+
+        assert MusicDownloader()._normalize_loudness(audio_path) is False
+        assert audio_path.read_bytes() == b"original bytes"
+        assert not list(tmp_path.glob("*.norm.mp3"))
+
+    def test_missing_measurement_json_keeps_original(self, tmp_path, mocker):
+        """Measurement returning no JSON block -> False, file untouched."""
+        import subprocess
+        audio_path = tmp_path / "track.mp3"
+        audio_path.write_bytes(b"original bytes")
+        mocker.patch(
+            "yodle.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, "", "no json here"),
+        )
+
+        assert MusicDownloader()._normalize_loudness(audio_path) is False
+        assert audio_path.read_bytes() == b"original bytes"
+
+    def test_success_reencodes_and_replaces(self, tmp_path, mocker):
+        """Two-pass success: measured values applied, file replaced."""
+        import json
+        import subprocess
+        audio_path = tmp_path / "track.mp3"
+        audio_path.write_bytes(b"original bytes")
+
+        loudnorm_json = json.dumps({
+            "input_i": "-18.0", "input_tp": "-3.0", "input_lra": "7.0",
+            "input_thresh": "-28.0", "target_offset": "0.5",
+        })
+        captured = {}
+
+        def fake_run(cmd, capture_output=True, text=True):
+            joined = " ".join(cmd)
+            if "print_format=json" in joined:
+                return subprocess.CompletedProcess(cmd, 0, "", loudnorm_json)
+            captured["apply_cmd"] = list(cmd)
+            Path(cmd[-1]).write_bytes(b"normalized bytes")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        mocker.patch("yodle.subprocess.run", side_effect=fake_run)
+
+        assert MusicDownloader()._normalize_loudness(audio_path) is True
+        assert audio_path.read_bytes() == b"normalized bytes"
+
+        apply_cmd = captured["apply_cmd"]
+        joined = " ".join(apply_cmd)
+        assert "measured_I=-18.0" in joined
+        assert "linear=true" in joined
+        assert "-map 0:v?" in joined
+        assert "libmp3lame" in apply_cmd
+        assert apply_cmd[-1].endswith(".norm.mp3")

@@ -18,7 +18,14 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from yodle import sanitize_filename, is_playlist, is_channel, check_ffmpeg, parse_duration
+from yodle import (
+    sanitize_filename,
+    is_playlist,
+    is_channel,
+    check_ffmpeg,
+    parse_duration,
+    parse_audio_quality,
+)
 
 
 class TestSanitizeFilename:
@@ -309,3 +316,47 @@ class TestParseDuration:
         message = str(excinfo.value)
         assert "59m" in message
         assert "1:30:00" in message
+
+
+class TestParseAudioQuality:
+    """Test suite for --audio-quality parsing."""
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ("0", 0),
+            ("5", 5),
+            ("10", 10),
+            ("192", 192),
+            ("320", 320),
+            (" 320 ", 320),
+        ],
+    )
+    def test_valid_qualities(self, value, expected):
+        """Valid quality strings parse to the expected integer."""
+        assert parse_audio_quality(value) == expected
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "-1",
+            "abc",
+            "",
+            "1.5",
+            "999",
+            "1000",
+            "320k",
+        ],
+    )
+    def test_invalid_qualities(self, value):
+        """Invalid quality strings raise ArgumentTypeError."""
+        with pytest.raises(argparse.ArgumentTypeError):
+            parse_audio_quality(value)
+
+    def test_error_message_lists_accepted_forms(self):
+        """Error message helps the user recover."""
+        with pytest.raises(argparse.ArgumentTypeError) as excinfo:
+            parse_audio_quality("bogus")
+        message = str(excinfo.value)
+        assert "0-10" in message
+        assert "320" in message

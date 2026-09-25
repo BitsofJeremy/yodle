@@ -33,7 +33,7 @@ Single-file application. Dependencies live in `pyproject.toml` (managed by uv); 
 
 ### Features
 - **Video**: Downloads in best H.264/HEVC quality
-- **Music**: Downloads as MP3 with embedded ID3 tags and album art
+- **Music**: Downloads as MP3 with embedded ID3 tags and album art; quality via `--audio-quality`, optional loudness normalization via `--normalize`
 - **Both**: Downloads video and music versions
 - **Thumbnails**: Downloads all thumbnails from a YouTube channel (original + resized)
 - **Time limits**: `--limit DURATION` truncates each download (e.g. `--limit 59m`)
@@ -47,6 +47,8 @@ Single-file application. Dependencies live in `pyproject.toml` (managed by uv); 
 | `--video-format` | `mp4`, `mkv`, `webm` | `mp4` | Video container |
 | `--audio-format` | `mp3`, `m4a` | `mp3` | Audio format |
 | `--limit` | `90`, `90s`, `59m`, `2h`, `1:30:00` | unset (full download) | Max duration per video; no-op with `-t thumbnails` |
+| `--audio-quality` | `0`-`10` (VBR, 0=best), `11`-`320` (kbps) | `0` | Music encoder quality; no-op with `-t video/thumbnails` |
+| `--normalize` | flag | off | Loudness-normalize music to -14 LUFS (two-pass ffmpeg loudnorm) |
 | `-b, --browser` | `none`, `chrome`, `firefox` | unset | Extract browser cookies for private/age-restricted videos |
 | `--cookies-file` | path | unset | Use an existing Netscape cookies.txt |
 
@@ -64,8 +66,9 @@ Environment: `YODLE_OUTPUT_DIR` (also loadable from a project-root `.env`) sets 
 - `run_download()` / `main()`: argparse CLI entry points
 
 ### Technical Details
-- **Player client workaround**: `YDL_COMMON_OPTS` uses `extractor_args: {"youtube": {"player_client": ["web", "android"]}}` plus `remote_components: ["ejs:github"]` — the EJS challenge solver is fetched at runtime (needs Deno) to work around YouTube signature/`n`-parameter challenges that cause 403 errors.
-- **Time limits**: `--limit` is parsed by `parse_duration()` and injected as yt-dlp `download_ranges` + `force_keyframes_at_cuts` opts, so only the requested range is fetched and ffmpeg re-encodes at the cut point.
+- **Player client workaround**: `YDL_COMMON_OPTS` uses `extractor_args: {"youtube": {"player_client": ["web", "android_vr"]}}` plus `remote_components: ["ejs:github"]` — the EJS challenge solver is fetched at runtime (needs Deno) to work around YouTube signature/`n`-parameter challenges that cause 403 errors. `android_vr` is the fallback because `android` is SABR-limited (no audio-only DASH formats) and `web` alone can be risk-rejected by YouTube.
+- **Time limits**: `--limit` is parsed by `parse_duration()` and injected as yt-dlp `download_ranges` opts, so only the requested range is fetched. Video also gets `force_keyframes_at_cuts` (frame-accurate re-encode at the cut); music does **not** — forcing keyframes would make yt-dlp's ranged FFmpeg download drop `-c copy`, causing a double lossy transcode. `_apply_limit_opts(opts, limit_seconds, force_keyframes=...)` controls this.
+- **Music quality**: `FFmpegExtractAudio` gets `preferredquality` from `--audio-quality` (default `0` = best VBR). Optional `--normalize` runs a Yodle-side two-pass ffmpeg `loudnorm` pass (-14 LUFS, linear mode) after download, before ID3 tagging. m4a `postprocessor_args` must stay dict-form scoped to `embedthumbnail+ffmpeg` — list-form args leak into every ffmpeg postprocessor and break stream copies. For m4a, `FFmpegMetadata` must run **before** `EmbedThumbnail`: the metadata pass's `-vn` would otherwise drop the cover art (mp3 order is the reverse and stays that way).
 - **Playlists**: Detected by `playlist` or `list=` in URL; auto-expands to individual videos
 - **Channels**: Detected by `/@`, `/channel/`, `/c/`, or `/user/` in URL
 

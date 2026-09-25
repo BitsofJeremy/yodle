@@ -28,6 +28,14 @@ Download videos, music, and channel thumbnails with ease. Built with Python and 
 
 ## Recent Updates
 
+### Music Audio Quality (`--audio-quality`, `--normalize`)
+
+Music downloads now encode exactly once at full quality: `--limit` no longer forces a keyframe re-encode on music (the range is stream-copied), encoder quality is configurable with `--audio-quality` (default: best VBR), and an optional `--normalize` flag loudness-matches tracks to -14 LUFS (EBU R128, two-pass).
+
+```bash
+uv run yodle -t music --limit 59m --normalize 'https://youtube.com/watch?v=...'
+```
+
 ### Download Time Limit (`--limit`)
 
 Truncate each download to at most a given duration — for example, only the first 59 minutes of a long video:
@@ -36,7 +44,7 @@ Truncate each download to at most a given duration — for example, only the fir
 uv run yodle -t video --limit 59m 'https://youtube.com/watch?v=...'
 ```
 
-Accepted forms: plain seconds (`90`), unit suffix (`90s`, `59m`, `2h`), or clock form (`1:30:00`, zero-padded). No flag means a full download. The cut is frame-accurate: yt-dlp downloads only the requested range and re-encodes at the cut point. With `-t thumbnails` the flag is ignored.
+Accepted forms: plain seconds (`90`), unit suffix (`90s`, `59m`, `2h`), or clock form (`1:30:00`, zero-padded). No flag means a full download. yt-dlp downloads only the requested range. For video the cut is frame-accurate: ffmpeg re-encodes at the cut point. For music there is no re-encode at the cut (audio has no keyframes), so the stream is copied and the audio is encoded exactly once. With `-t thumbnails` the flag is ignored.
 
 ### Configurable Output Directory
 
@@ -80,6 +88,8 @@ The default output directory has changed from `~/Downloads/Yodle` to `~/Yodle`. 
 - **Playlist Support**: Automatically detect and expand playlists into individual downloads
 - **Format Selection**: Choose output format for both video and audio
 - **Time Limits**: Download only the first N seconds of each video with `--limit`
+- **Audio Quality Control**: Tune music encoder quality with `--audio-quality` (VBR 0-320 kbps)
+- **Loudness Normalization**: Optional `--normalize` matches all music to -14 LUFS (EBU R128)
 
 ### Quality of Life
 
@@ -316,6 +326,37 @@ uv run yodle --audio-format m4a 'URL'
 uv run yodle -t music --audio-format m4a 'URL'
 ```
 
+#### `--audio-quality QUALITY`
+
+Encoder quality for music downloads.
+
+| Values | Meaning |
+|--------|---------|
+| `0`–`10` | VBR quality, `0` = best (mp3 V0, m4a AAC -q:a 4) |
+| `11`–`320` | Target bitrate in kbps (e.g. `192`, `320`) |
+
+**Default:** `0` (best VBR). Ignored with `-t video/thumbnails`.
+
+**Examples:**
+```bash
+uv run yodle -t music --audio-quality 320 'URL'
+uv run yodle -t music --audio-quality 0 'URL'   # default: best VBR
+```
+
+#### `--normalize`
+
+Loudness-normalize music downloads to **-14 LUFS** (EBU R128) so tracks play back at consistent volume regardless of how loud the source upload is. Uses a two-pass ffmpeg `loudnorm` in linear mode (one static gain for the whole track — no pumping), with a -1.5 dBTP true-peak ceiling.
+
+- Adds one extra encode pass to the output file.
+- On failure the original (un-normalized) file is kept and a warning is logged.
+- Default: off. Ignored with `-t video/thumbnails`.
+
+**Examples:**
+```bash
+uv run yodle -t music --normalize 'URL'
+uv run yodle -t music --normalize --audio-quality 320 'URL'
+```
+
 #### `--limit DURATION`
 
 Download at most DURATION per video, starting from the beginning.
@@ -333,7 +374,7 @@ Accepted forms:
 **Notes:**
 - The value must be positive; `0` and negatives are rejected.
 - MM:SS alone (e.g. `1:30`) is not accepted — use `90s` or `1:00:30`.
-- Only the first DURATION of each video is fetched (bandwidth scales with the limit), and ffmpeg re-encodes at the cut point for a frame-accurate boundary.
+- Only the first DURATION of each video is fetched (bandwidth scales with the limit). For video, ffmpeg re-encodes at the cut point for a frame-accurate boundary; for music the audio stream is copied, so the file is encoded exactly once.
 - With playlists, the limit applies to each video individually.
 - No-op with `-t thumbnails`.
 

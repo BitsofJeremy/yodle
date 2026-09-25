@@ -25,6 +25,7 @@ Usage:
 import argparse
 import asyncio
 import functools
+import json
 import logging
 import os
 import re
@@ -62,10 +63,18 @@ COOKIES_PATH = Path.home() / ".config" / "yt-dlp" / "cookies.txt"
 # Common yt-dlp options applied to all extractors.
 # remote_components downloads the EJS challenge solver script at runtime,
 # which Deno needs to crack YouTube's JS signature/n challenges.
+# Client order matters: web gives the widest format support when healthy;
+# android_vr is the reliable fallback (android is SABR-limited and often
+# yields no audio-only DASH formats; web alone can be risk-rejected).
 YDL_COMMON_OPTS = {
-    "extractor_args": {"youtube": {"player_client": ["web", "android"]}},
+    "extractor_args": {"youtube": {"player_client": ["web", "android_vr"]}},
     "remote_components": ["ejs:github"],
 }
+
+# EBU R128 loudness targets for --normalize (ffmpeg loudnorm)
+LOUDNORM_I = "-14"    # target integrated loudness (LUFS; streaming standard)
+LOUDNORM_TP = "-1.5"  # true-peak ceiling (dBTP)
+LOUDNORM_LRA = "11"   # target loudness range (LU)
 
 # Logging setup
 logging.basicConfig(
@@ -159,11 +168,46 @@ def parse_duration(value: str) -> int:
     return seconds
 
 
-def _apply_limit_opts(opts: dict, limit_seconds: Optional[int]) -> dict:
-    """Add yt-dlp download-range opts so only the first N seconds are fetched."""
+_AUDIO_QUALITY_ERROR = (
+    "invalid --audio-quality value {value!r}: expected an integer — "
+    "0-10 for VBR quality (0 = best, 10 = worst), or 11-320 for "
+    "bitrate in kbps (e.g. 192, 320)"
+)
+
+
+def parse_audio_quality(value: str) -> int:
+    """Parse --audio-quality into yt-dlp FFmpegExtractAudio 'preferredquality'.
+
+    0-10 selects VBR quality (0 = best: mp3 V0 / aac -q:a 4);
+    11-320 selects a target bitrate in kbps. Raises
+    argparse.ArgumentTypeError on anything else.
+    """
+    value = value.strip()
+    if not re.fullmatch(r"\d{1,3}", value) or int(value) > 320:
+        raise argparse.ArgumentTypeError(
+            _AUDIO_QUALITY_ERROR.format(value=value)
+        )
+    return int(value)
+
+
+def _apply_limit_opts(
+    opts: dict,
+    limit_seconds: Optional[int],
+    *,
+    force_keyframes: bool = True,
+) -> dict:
+    """Add yt-dlp download-range opts so only the first N seconds is fetched.
+
+    force_keyframes=True requests a re-encode at the cut for frame-accurate
+    VIDEO cuts. Music passes force_keyframes=False: audio has no keyframes,
+    and forcing them makes yt-dlp's ranged FFmpeg download omit '-c copy',
+    re-encoding the audio during download AND again in FFmpegExtractAudio
+    (a double lossy transcode).
+    """
     if limit_seconds is not None:
         opts["download_ranges"] = download_range_func(None, [(0, limit_seconds)])
-        opts["force_keyframes_at_cuts"] = True
+        if force_keyframes:
+            opts["force_keyframes_at_cuts"] = True
     return opts
 
 
@@ -437,7 +481,7 @@ class VideoDownloader:
 class MusicDownloader:
     """Downloads audio and converts to MP3 with embedded metadata."""
 
-    FORMAT_STRING = "bestaudio/best"
+    FORMAT_STRING = "bestaudio[acodec=opus]/bestaudio[ext=m4a]/bestaudio/best"
 
     def __init__(
         self,
@@ -445,11 +489,15 @@ class MusicDownloader:
         progress_callback: Optional[Callable] = None,
         output_format: str = "mp3",
         limit_seconds: Optional[int] = None,
+        audio_quality: int = 0,
+        normalize: bool = False,
     ):
         self.cookies_path = cookies_path
         self.progress_callback = progress_callback
         self.output_format = output_format.lower()
         self.limit_seconds = limit_seconds
+        self.audio_quality = audio_quality
+        self.normalize = normalize
 
     def _get_opts(self, output_dir: Path) -> dict:
         """Get yt-dlp options for music download."""
@@ -461,28 +509,38 @@ class MusicDownloader:
             "retries": 3,
         }
 
+        quality = str(self.audio_quality)
         if self.output_format == "mp3":
             # Extract directly to MP3 using FFmpeg
             opts["postprocessors"] = [
-                {"key": "FFmpegExtractAudio", "preferredcodec": "mp3"},
+                {"key": "FFmpegExtractAudio", "preferredcodec": "mp3",
+                 "preferredquality": quality},
                 {"key": "EmbedThumbnail"},
                 {"key": "FFmpegMetadata"},
             ]
         else:
-            # Keep as M4A with embedded thumbnail
+            # Keep as M4A with embedded thumbnail.
+            # FFmpegMetadata must run BEFORE EmbedThumbnail: its m4a output
+            # args include '-vn', which drops the cover that EmbedThumbnail
+            # writes (mutagen 'covr'). Metadata first, cover last = survives.
             opts["postprocessors"] = [
-                {"key": "FFmpegExtractAudio", "preferredcodec": "m4a"},
-                {"key": "EmbedThumbnail"},
+                {"key": "FFmpegExtractAudio", "preferredcodec": "m4a",
+                 "preferredquality": quality},
                 {"key": "FFmpegMetadata"},
+                {"key": "EmbedThumbnail"},
             ]
-            opts["postprocessor_args"] = [
-                "-c:a",
-                "aac",
-                "-metadata:s:v",
-                'title="Album Cover"',
-                "-metadata:s:v",
-                'comment="Cover (Front)"',
-            ]
+            # Scope cover-art metadata to EmbedThumbnail's ffmpeg invocation only.
+            # List-form postprocessor_args are appended to EVERY ffmpeg PP's output
+            # args; the old "-c:a aac" landed after FFmpegMetadata's "-acodec copy"
+            # (forcing a second AAC encode) and after ExtractAudio's lossless copy
+            # path. Key "embedthumbnail+ffmpeg" matches only FFmpegEmbedThumbnailPP
+            # runs via ffmpeg (yt-dlp builds root_key = f"{pp_key}+{exe}").
+            opts["postprocessor_args"] = {
+                "embedthumbnail+ffmpeg": [
+                    "-metadata:s:v", "title=Album Cover",
+                    "-metadata:s:v", "comment=Cover (Front)",
+                ],
+            }
 
         if self.cookies_path and self.cookies_path.exists():
             opts["cookiefile"] = str(self.cookies_path)
@@ -490,7 +548,9 @@ class MusicDownloader:
         if self.progress_callback:
             opts["progress_hooks"] = [self._progress_hook]
 
-        return _apply_limit_opts(opts, self.limit_seconds)
+        return _apply_limit_opts(
+            opts, self.limit_seconds, force_keyframes=False
+        )
 
     def _progress_hook(self, d: dict) -> None:
         """Progress hook for yt-dlp."""
@@ -598,6 +658,80 @@ class MusicDownloader:
         except Exception as e:
             logger.warning(f"ID3 tagging failed: {e}")
 
+    def _quality_encode_args(self) -> List[str]:
+        """Encoder args for the normalization re-encode, mirroring yt-dlp's
+        FFmpegExtractAudioPP._quality_args scaling: mp3 VBR 0=V0 best;
+        aac VBR 0 -> -q:a 4 (best); values >10 are bitrates for both."""
+        q = self.audio_quality
+        if q > 10:
+            return ["-b:a", f"{q}k"]
+        if self.output_format == "mp3":
+            return ["-c:a", "libmp3lame", "-q:a", f"{q}"]
+        return ["-c:a", "aac", "-q:a", f"{4 - 0.39 * q:.2f}"]  # 4=best, 0.1=worst
+
+    def _normalize_loudness(self, audio_path: Path) -> bool:
+        """Two-pass EBU R128 loudness normalization to -14 LUFS, in place.
+
+        Pass 1 measures with loudnorm print_format=json; pass 2 applies the
+        measured values in linear mode (static gain — no pumping on music).
+        On any failure the original file is kept and False is returned.
+        """
+        measure_cmd = [
+            "ffmpeg", "-hide_banner", "-nostats",
+            "-i", str(audio_path),
+            "-map", "0:a:0",
+            "-af", (f"loudnorm=I={LOUDNORM_I}:TP={LOUDNORM_TP}"
+                    f":LRA={LOUDNORM_LRA}:print_format=json"),
+            "-f", "null", "-",
+        ]
+        try:
+            proc = subprocess.run(measure_cmd, capture_output=True, text=True)
+            blocks = re.findall(r"\{.*?\}", proc.stderr or "", re.DOTALL)
+            if proc.returncode != 0 or not blocks:
+                raise RuntimeError("no loudnorm measurement data")
+            m = json.loads(blocks[-1])
+            measured = (
+                f":measured_I={m['input_i']}:measured_TP={m['input_tp']}"
+                f":measured_LRA={m['input_lra']}"
+                f":measured_thresh={m['input_thresh']}"
+                f":offset={m['target_offset']}"
+            )
+        except (OSError, RuntimeError, ValueError, KeyError) as e:
+            logger.warning(
+                f"Loudness measurement failed ({e}); keeping original: {audio_path.name}"
+            )
+            return False
+
+        tmp_path = audio_path.with_name(f"{audio_path.stem}.norm{audio_path.suffix}")
+        apply_cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-nostats",
+            "-i", str(audio_path),
+            "-map", "0:a:0", "-map", "0:v?", "-c:v", "copy",  # keep embedded cover art
+            "-af", (f"loudnorm=I={LOUDNORM_I}:TP={LOUDNORM_TP}:LRA={LOUDNORM_LRA}"
+                    f"{measured}:linear=true"),
+            *self._quality_encode_args(),
+            str(tmp_path),
+        ]
+        try:
+            proc = subprocess.run(apply_cmd, capture_output=True, text=True)
+            if proc.returncode != 0 or not tmp_path.exists():
+                raise RuntimeError(
+                    (proc.stderr or "").strip().splitlines()[-1]
+                    if proc.stderr else "no output produced"
+                )
+            os.replace(tmp_path, audio_path)
+            logger.info(f"Loudness normalized to {LOUDNORM_I} LUFS: {audio_path.name}")
+            return True
+        except (OSError, RuntimeError) as e:
+            logger.warning(
+                f"Loudness normalization failed ({e}); keeping original: {audio_path.name}"
+            )
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return False
+
     def download(self, url: str, output_dir: Path) -> DownloadResult:
         """Download audio and embed metadata."""
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -628,6 +762,9 @@ class MusicDownloader:
                     self._save_thumbnail_png(output_dir, thumbnail_url, audio_path.stem)
 
                 if audio_path.exists():
+                    if self.normalize:
+                        # Failure keeps the original file; tags go on after
+                        self._normalize_loudness(audio_path)
                     # Embed custom ID3 tags and thumbnail for MP3
                     if ext == "mp3":
                         self._embed_id3_tags(audio_path, info)
@@ -822,6 +959,8 @@ class DownloadManager:
         video_format: str = "mp4",
         audio_format: str = "mp3",
         limit_seconds: Optional[int] = None,
+        audio_quality: int = 0,
+        normalize: bool = False,
     ):
         self.output_dir = output_dir
         self.cookies_path = cookies_path
@@ -835,6 +974,8 @@ class DownloadManager:
         self.music_downloader = MusicDownloader(
             cookies_path, progress_callback, audio_format,
             limit_seconds=limit_seconds,
+            audio_quality=audio_quality,
+            normalize=normalize,
         )
         self.thumbnail_downloader = ThumbnailDownloader(progress_callback)
 
@@ -1006,6 +1147,8 @@ def run_download(args):
         video_format=args.video_format,
         audio_format=args.audio_format,
         limit_seconds=args.limit,
+        audio_quality=args.audio_quality,
+        normalize=args.normalize,
     )
 
     # Start download
@@ -1073,6 +1216,28 @@ Examples:
         choices=["mp3", "m4a"],
         default="mp3",
         help="Audio output format (default: mp3)",
+    )
+
+    parser.add_argument(
+        "--audio-quality",
+        type=parse_audio_quality,
+        default=0,
+        metavar="QUALITY",
+        help=(
+            "Music encoder quality: 0-10 = VBR quality (0 = best), "
+            "11-320 = bitrate in kbps (e.g. 320). Default: 0. "
+            "No-op with -t video/thumbnails."
+        ),
+    )
+
+    parser.add_argument(
+        "--normalize",
+        action="store_true",
+        help=(
+            "Loudness-normalize music downloads to -14 LUFS (EBU R128, two-pass "
+            "ffmpeg loudnorm; adds one extra encode pass). "
+            "Default: off. No-op with -t video/thumbnails."
+        ),
     )
 
     parser.add_argument(
