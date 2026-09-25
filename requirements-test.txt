@@ -19,7 +19,7 @@ pytest-html>=3.2.0      # HTML test reports
 pytest-watch>=4.2.0     # Auto-run tests on file changes
 
 # Application dependencies (should match yodle.py requirements)
-yt-dlp>=2024.1.1
+yt-dlp>=2026.8.19
 mutagen>=1.47.0
 pydub>=0.25.1
 pillow>=10.0.0
