@@ -60,6 +60,7 @@ uv run yodle -t music --limit 59m 'URL'             # mp3, first 59 minutes
 uv run yodle -t music --audio-quality 320 'URL'     # CBR 320k (default: best VBR)
 uv run yodle -t music --normalize 'URL'             # loudness-match to -14 LUFS
 uv run yodle -t thumbnails 'https://youtube.com/@channel'
+uv run yodle -t music -a mylist.txt                 # batch: one URL per line, # comments
 uv run yodle -b chrome 'URL'                        # browser cookies, private/age-gated
 uv run --with-requirements requirements-test.txt pytest   # test suite
 YODLE_OUTPUT_DIR=/tmp/out uv run yodle -t video 'URL'     # override output dir

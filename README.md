@@ -28,6 +28,15 @@ Download videos, music, and channel thumbnails with ease. Built with Python and 
 
 ## Recent Updates
 
+### Batch File Input (`-a, --batch-file`)
+
+Load URLs from a text file — one per line, `#` starts a comment, blank lines are skipped. File entries are combined with any URLs given on the command line, and playlist URLs in the file still auto-expand:
+
+```bash
+uv run yodle -t music -a mylist.txt
+uv run yodle -t music -a mylist.txt 'https://youtube.com/watch?v=extra'
+```
+
 ### Music Audio Quality (`--audio-quality`, `--normalize`)
 
 Music downloads now encode exactly once at full quality: `--limit` no longer forces a keyframe re-encode on music (the range is stream-copied), encoder quality is configurable with `--audio-quality` (default: best VBR), and an optional `--normalize` flag loudness-matches tracks to -14 LUFS (EBU R128, two-pass).
@@ -120,6 +129,9 @@ uv run yodle -t video --limit 59m 'URL'
 
 # Multiple URLs
 uv run yodle -t music 'URL1' 'URL2' 'URL3'
+
+# URLs from a text file (one per line, # = comment)
+uv run yodle -t music -a mylist.txt
 
 # With browser cookies for private videos
 uv run yodle -b chrome 'https://youtube.com/watch?v=...'
@@ -280,6 +292,24 @@ urls                  YouTube URL(s) to download (one or more)
 **Note:** If no URLs are provided, Yodle prints help and exits.
 
 ### Options
+
+#### `-a, --batch-file FILE`
+
+Read additional URLs from a text file, one per line. Blank lines and lines starting with `#` are skipped; surrounding whitespace and Windows line endings are handled. File URLs are combined with any positional `urls` (file entries come after inline URLs), and playlist URLs inside the file auto-expand as usual.
+
+**Examples:**
+```bash
+uv run yodle -t music -a mylist.txt
+uv run yodle -t music -a mylist.txt 'URL'   # file + inline combined
+```
+
+**mylist.txt:**
+```
+# weekend downloads
+https://youtube.com/watch?v=aaa
+
+https://youtube.com/watch?v=bbb
+```
 
 #### `-t, --type {video,music,both,thumbnails}`
 Download type specification.

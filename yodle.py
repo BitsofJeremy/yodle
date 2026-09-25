@@ -191,6 +191,24 @@ def parse_audio_quality(value: str) -> int:
     return int(value)
 
 
+def read_batch_file(path) -> List[str]:
+    """Read URLs for -a/--batch-file: one per line, # comments, blanks skipped.
+
+    Lines are stripped (handles whitespace and CRLF). Raises
+    argparse.ArgumentTypeError if the path is missing or not a regular file.
+    """
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise argparse.ArgumentTypeError(f"batch file not found: {path}")
+    urls = []
+    for line in file_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        urls.append(line)
+    return urls
+
+
 def _apply_limit_opts(
     opts: dict,
     limit_seconds: Optional[int],
@@ -1152,9 +1170,10 @@ def run_download(args):
         normalize=args.normalize,
     )
 
-    # Start download
-    print(f"\nDownloading {len(args.urls)} URL(s) as {args.type}...")
-    results = manager.download(args.urls, args.type)
+    # Start download — inline positional URLs first, then -a batch file entries
+    urls = [*args.urls, *(args.batch_file or [])]
+    print(f"\nDownloading {len(urls)} URL(s) as {args.type}...")
+    results = manager.download(urls, args.type)
 
     # Print summary
     print("\n")
@@ -1168,8 +1187,8 @@ def run_download(args):
     sys.exit(0 if fail_count == 0 else 1)
 
 
-def main():
-    """Main entry point."""
+def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser (split out for testability)."""
     parser = argparse.ArgumentParser(
         description="Yodle - YouTube Downloader",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1190,12 +1209,27 @@ Examples:
   # Multiple URLs
   uv run yodle -t music 'URL1' 'URL2' 'URL3'
 
+  # URLs from a text file (one per line, # = comment)
+  uv run yodle -t music -a mylist.txt
+
   # With browser cookies
   uv run yodle -b chrome 'https://youtube.com/watch?v=...'
         """,
     )
 
     parser.add_argument("urls", nargs="*", help="YouTube URL(s) to download")
+
+    parser.add_argument(
+        "-a",
+        "--batch-file",
+        type=read_batch_file,
+        default=None,
+        metavar="FILE",
+        help=(
+            "Read additional URLs from FILE, one per line (# starts a comment, "
+            "blank lines skipped); combined with any URLs given on the command line"
+        ),
+    )
 
     parser.add_argument(
         "-t",
@@ -1261,12 +1295,19 @@ Examples:
 
     parser.add_argument("--cookies-file", help="Path to custom cookies.txt file")
 
+    return parser
+
+
+def main():
+    """Main entry point."""
+    parser = build_parser()
     args = parser.parse_args()
 
     # Ensure output directory exists
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    if not args.urls:
+    # batch_file is a (possibly empty) list when -a parsed a file, else None
+    if not args.urls and not args.batch_file:
         parser.print_help()
         sys.exit(0)
 

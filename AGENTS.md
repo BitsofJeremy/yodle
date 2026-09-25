@@ -25,8 +25,9 @@ Python 3.11–3.12 is required (`requires-python = ">=3.11, <3.13"`).
 ## Run
 
 ```bash
-uv run yodle.py                      # no URLs → prints help and exits
+uv run yodle.py                      # no URLs (and no -a) → prints help and exits
 uv run yodle -t music --limit 59m 'https://youtu.be/VIDEO_ID'
+uv run yodle -t music -a mylist.txt  # batch: one URL per line, # comments
 uv run yodle --help                  # full flag table
 ```
 

@@ -646,3 +646,90 @@ class TestNormalize:
         assert "-map 0:v?" in joined
         assert "libmp3lame" in apply_cmd
         assert apply_cmd[-1].endswith(".norm.mp3")
+
+
+class TestBatchFile:
+    """Tests for -a/--batch-file text file input."""
+
+    def test_parser_accepts_batch_file(self, tmp_path):
+        """-a parses a URL list file; inline urls positional still works."""
+        from yodle import build_parser
+
+        batch = tmp_path / "list.txt"
+        batch.write_text(
+            "https://youtube.com/watch?v=aaa\n"
+            "# comment\n"
+            "https://youtube.com/watch?v=bbb\n"
+        )
+        args = build_parser().parse_args(
+            ["-t", "music", "-a", str(batch), "https://youtube.com/watch?v=inline"]
+        )
+        assert args.batch_file == [
+            "https://youtube.com/watch?v=aaa",
+            "https://youtube.com/watch?v=bbb",
+        ]
+        assert args.urls == ["https://youtube.com/watch?v=inline"]
+
+    def test_parser_batch_file_defaults_to_none(self):
+        """Without -a, batch_file is None (no file read attempted)."""
+        from yodle import build_parser
+
+        args = build_parser().parse_args(["https://youtube.com/watch?v=aaa"])
+        assert args.batch_file is None
+
+    def test_run_download_merges_batch_urls(self, mocker):
+        """run_download feeds inline + batch urls to DownloadManager in order."""
+        from types import SimpleNamespace
+        from yodle import run_download
+
+        mocker.patch("yodle.check_ffmpeg", return_value=True)
+        manager = mocker.patch("yodle.DownloadManager").return_value
+        manager.download.return_value = []
+
+        args = SimpleNamespace(
+            urls=["https://youtube.com/watch?v=inline"],
+            batch_file=["https://youtube.com/watch?v=file1", "https://youtube.com/watch?v=file2"],
+            type="music",
+            video_format="mp4",
+            audio_format="mp3",
+            limit=None,
+            audio_quality=0,
+            normalize=False,
+            cookies_file=None,
+            browser=None,
+        )
+        with pytest.raises(SystemExit):
+            run_download(args)
+
+        called_urls = manager.download.call_args[0][0]
+        assert called_urls == [
+            "https://youtube.com/watch?v=inline",
+            "https://youtube.com/watch?v=file1",
+            "https://youtube.com/watch?v=file2",
+        ]
+
+    def test_run_download_without_batch_file(self, mocker):
+        """No -a: behavior unchanged — only inline urls are downloaded."""
+        from types import SimpleNamespace
+        from yodle import run_download
+
+        mocker.patch("yodle.check_ffmpeg", return_value=True)
+        manager = mocker.patch("yodle.DownloadManager").return_value
+        manager.download.return_value = []
+
+        args = SimpleNamespace(
+            urls=["https://youtube.com/watch?v=aaa"],
+            batch_file=None,
+            type="video",
+            video_format="mp4",
+            audio_format="mp3",
+            limit=None,
+            audio_quality=0,
+            normalize=False,
+            cookies_file=None,
+            browser=None,
+        )
+        with pytest.raises(SystemExit):
+            run_download(args)
+
+        assert manager.download.call_args[0][0] == ["https://youtube.com/watch?v=aaa"]

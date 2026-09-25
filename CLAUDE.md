@@ -16,7 +16,7 @@ uv run yodle.py
 python yodle.py
 ```
 
-Running with no URLs prints help and exits.
+Running with no URLs (and no `-a` file) prints help and exits.
 
 ## Requirements
 
@@ -42,7 +42,8 @@ Single-file application. Dependencies live in `pyproject.toml` (managed by uv); 
 
 | Flag | Values | Default | Purpose |
 |------|--------|---------|---------|
-| `urls` | one or more YouTube URLs | — (required to run) | What to download |
+| `urls` | one or more YouTube URLs | — (urls or `-a` required to run) | What to download |
+| `-a, --batch-file` | path to URL list file | unset | Read URLs from file, one per line (`#` comments, blanks skipped); combined with inline `urls` |
 | `-t, --type` | `video`, `music`, `both`, `thumbnails` | `both` | Download type |
 | `--video-format` | `mp4`, `mkv`, `webm` | `mp4` | Video container |
 | `--audio-format` | `mp3`, `m4a` | `mp3` | Audio format |

@@ -25,6 +25,7 @@ from yodle import (
     check_ffmpeg,
     parse_duration,
     parse_audio_quality,
+    read_batch_file,
 )
 
 
@@ -360,3 +361,64 @@ class TestParseAudioQuality:
         message = str(excinfo.value)
         assert "0-10" in message
         assert "320" in message
+
+
+class TestReadBatchFile:
+    """Test suite for -a/--batch-file URL list parsing."""
+
+    def test_reads_one_url_per_line(self, tmp_path):
+        """Non-empty lines are returned in order, stripped."""
+        batch = tmp_path / "list.txt"
+        batch.write_text(
+            "https://youtube.com/watch?v=aaa\n"
+            "https://youtube.com/watch?v=bbb\n"
+        )
+        assert read_batch_file(batch) == [
+            "https://youtube.com/watch?v=aaa",
+            "https://youtube.com/watch?v=bbb",
+        ]
+
+    def test_skips_blank_lines_and_comments(self, tmp_path):
+        """Blank lines and #-comment lines are ignored."""
+        batch = tmp_path / "list.txt"
+        batch.write_text(
+            "# my downloads\n"
+            "\n"
+            "https://youtube.com/watch?v=aaa\n"
+            "   \n"
+            "  # indented comment\n"
+            "https://youtube.com/watch?v=bbb\n"
+        )
+        assert read_batch_file(batch) == [
+            "https://youtube.com/watch?v=aaa",
+            "https://youtube.com/watch?v=bbb",
+        ]
+
+    def test_strips_whitespace_and_crlf(self, tmp_path):
+        """Leading/trailing whitespace and Windows line endings are handled."""
+        batch = tmp_path / "list.txt"
+        batch.write_bytes(
+            b"  https://youtube.com/watch?v=aaa  \r\nhttps://youtube.com/watch?v=bbb\r\n"
+        )
+        assert read_batch_file(batch) == [
+            "https://youtube.com/watch?v=aaa",
+            "https://youtube.com/watch?v=bbb",
+        ]
+
+    def test_empty_file_returns_empty_list(self, tmp_path):
+        """An empty batch file yields no URLs rather than erroring."""
+        batch = tmp_path / "list.txt"
+        batch.write_text("")
+        assert read_batch_file(batch) == []
+
+    def test_missing_file_raises_argument_type_error(self, tmp_path):
+        """A nonexistent path raises ArgumentTypeError naming the path."""
+        missing = tmp_path / "nope.txt"
+        with pytest.raises(argparse.ArgumentTypeError) as excinfo:
+            read_batch_file(missing)
+        assert "nope.txt" in str(excinfo.value)
+
+    def test_directory_raises_argument_type_error(self, tmp_path):
+        """A directory path is rejected like a missing file."""
+        with pytest.raises(argparse.ArgumentTypeError):
+            read_batch_file(tmp_path)
