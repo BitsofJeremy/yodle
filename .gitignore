@@ -1,6 +1,9 @@
 cookies.txt
 *cookies*
 
+# local batch URL lists
+videos.txt
+
 .idea/
 
 / optimized / DLL files
