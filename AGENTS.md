@@ -59,10 +59,12 @@ Key classes in `yodle.py` — grep for these names; the file is ~1000 lines:
 
 Details that are easy to break — read the matching CLAUDE.md section before touching:
 
-- **Player clients**: `YDL_COMMON_OPTS` uses `player_client: ["web", "android_vr"]`
-  with `remote_components: ["ejs:github"]`. `android` is SABR-limited (no
-  audio-only DASH), `web` alone gets risk-rejected. If formats vanish, re-test
-  clients individually before editing code.
+- **Player clients**: `YDL_COMMON_OPTS` does **not** pin `player_client` —
+  yt-dlp's defaults (visionos+web since 2026.08.19) are maintained upstream and
+  pinning `android_vr` (removed from defaults) causes HTTP 403s without a GVS
+  PO token (yt-dlp/yt-dlp#17456). `remote_components: ["ejs:github"]` stays for
+  JS-challenge solving. If formats vanish, re-test clients individually with
+  `yt-dlp --extractor-args 'youtube:player_client=X' -F 'URL'` before editing.
 - **`--limit` on music must NOT set `force_keyframes_at_cuts`** — it forces
   yt-dlp's ranged FFmpeg download to drop `-c copy` → double lossy transcode.
   Video keeps it (frame-accurate cuts). See `_apply_limit_opts()`.

@@ -91,11 +91,11 @@ YODLE_OUTPUT_DIR=/tmp/out uv run yodle -t video 'URL'     # override output dir
   (3) longer videos flag after 1–2 fetches — budget one fetch per video when
   testing; (4) private/age-gated → `-b chrome` with the browser closed first,
   or `--cookies-file PATH`.
-- **"Requested format is not available"** — `YDL_COMMON_OPTS` pins
-  `player_client: ["web", "android_vr"]`. `android` is SABR-limited and `web`
-  alone gets risk-rejected. Test clients individually with
-  `yt-dlp --extractor-args 'youtube:player_client=X' -F 'URL'` before editing
-  the constant.
+- **"Requested format is not available" or HTTP 403** — do NOT pin
+  `player_client` in `YDL_COMMON_OPTS`; yt-dlp's defaults (visionos+web since
+  2026.08.19) are maintained upstream, and pinned `android_vr` 403s without a
+  GVS PO token (yt-dlp/yt-dlp#17456). If formats vanish, test clients
+  individually with `yt-dlp --extractor-args 'youtube:player_client=X' -F 'URL'`.
 - **m4a has no cover art / audio sounds double-encoded** — postprocessor order
   and dict-scoped `postprocessor_args` are load-bearing; see `CLAUDE.md`
   Technical Details before touching `MusicDownloader`.

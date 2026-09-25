@@ -22,7 +22,34 @@ from yodle import (
     DownloadManager,
     DownloadResult,
     _apply_limit_opts,
+    YDL_COMMON_OPTS,
 )
+
+
+class TestPlayerClients:
+    """YDL_COMMON_OPTS must not pin player clients yt-dlp has removed.
+
+    android_vr was removed from yt-dlp's defaults in 2026.08.19 because its
+    HTTPS formats now require a GVS PO token and yield HTTP 403 without one
+    (yt-dlp/yt-dlp#17456). Pinning it degrades music to itag 18 and re-introduces
+    the 403s, so yodle must defer to yt-dlp's maintained defaults.
+    """
+
+    def test_no_player_client_pin(self):
+        """player_client must be left unset so yt-dlp defaults apply."""
+        youtube_args = YDL_COMMON_OPTS.get("extractor_args", {}).get("youtube", {})
+        assert "player_client" not in youtube_args
+
+    def test_removed_clients_never_pinned(self):
+        """Guard against re-adding clients dropped from yt-dlp defaults."""
+        youtube_args = YDL_COMMON_OPTS.get("extractor_args", {}).get("youtube", {})
+        clients = youtube_args.get("player_client", [])
+        for removed in ("android_vr", "android"):
+            assert removed not in clients
+
+    def test_ejs_remote_component_kept(self):
+        """The EJS challenge solver stays — signature/n-param 403 workaround."""
+        assert "ejs:github" in YDL_COMMON_OPTS["remote_components"]
 
 
 class TestCookieIntegration:

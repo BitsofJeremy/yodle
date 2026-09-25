@@ -63,11 +63,12 @@ COOKIES_PATH = Path.home() / ".config" / "yt-dlp" / "cookies.txt"
 # Common yt-dlp options applied to all extractors.
 # remote_components downloads the EJS challenge solver script at runtime,
 # which Deno needs to crack YouTube's JS signature/n challenges.
-# Client order matters: web gives the widest format support when healthy;
-# android_vr is the reliable fallback (android is SABR-limited and often
-# yields no audio-only DASH formats; web alone can be risk-rejected).
+# player_client is deliberately NOT pinned: yt-dlp 2026.08.19 removed
+# android_vr from its defaults (its HTTPS formats now need a GVS PO token
+# and 403 without one — yt-dlp/yt-dlp#17456) and now defaults to
+# visionos+web, which serves the full DASH audio set (opus 251). Pinning
+# here degraded music to itag 18 and re-introduced the 403s.
 YDL_COMMON_OPTS = {
-    "extractor_args": {"youtube": {"player_client": ["web", "android_vr"]}},
     "remote_components": ["ejs:github"],
 }
 
