@@ -67,9 +67,11 @@ Details that are easy to break — read the matching CLAUDE.md section before to
   PO token (yt-dlp/yt-dlp#17456). `remote_components: ["ejs:github"]` stays for
   JS-challenge solving. If formats vanish, re-test clients individually with
   `yt-dlp --extractor-args 'youtube:player_client=X' -F 'URL'` before editing.
-- **`--limit` on music must NOT set `force_keyframes_at_cuts`** — it forces
-  yt-dlp's ranged FFmpeg download to drop `-c copy` → double lossy transcode.
-  Video keeps it (frame-accurate cuts). See `_apply_limit_opts()`.
+- **`--limit` stream-copies by default** — nothing sets `force_keyframes_at_cuts`
+  unless `--exact-cut` (video only) is passed. Forcing it makes yt-dlp's ranged
+  FFmpeg download drop `-c copy`: double lossy transcode on music, CPU-bound
+  re-encode on video (~1–2x, worse for 4K). Ranges always start at 0:00, so a
+  copy cut lands within a frame. See `_apply_limit_opts()`.
 - **m4a postprocessor order**: `FFmpegExtractAudio` → `FFmpegMetadata` →
   `EmbedThumbnail`. The metadata pass's `-vn` would drop the cover art if
   `EmbedThumbnail` ran first. mp3 order is the reverse — don't "unify" them.

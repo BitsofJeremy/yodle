@@ -28,6 +28,15 @@ Download videos, music, and channel thumbnails with ease. Built with Python and 
 
 ## Recent Updates
 
+### Fast `--limit` Cuts (stream copy + `--exact-cut`)
+
+`--limit` now stream-copies the range instead of re-encoding it: downloads run at network speed instead of CPU-bound encode speed, audio stays bit-exact (no second lossy encode), and the cut lands within a frame of the limit — ranges always start at 0:00, so every frame before the cut decodes from the file's opening keyframe (verified: a 30s limit produced a 30.014s file with the source opus audio preserved untouched). Re-encode with `--exact-cut` only when you want a guaranteed frame-exact edge.
+
+```bash
+uv run yodle -t video --limit 59m 'URL'              # stream copy (default)
+uv run yodle -t video --limit 59m --exact-cut 'URL'  # frame-exact re-encode (slow)
+```
+
 ### Batch Download Pacing
 
 Multi-download runs (batch files, multiple URLs, playlists) now pause a random 1 to 15 minutes between each video, so back-to-back fetches don't trip YouTube's risk-flagging (the "request was rejected because it was considered high risk" 403s). The wait is logged before each pause; single-URL downloads are unaffected.
@@ -61,7 +70,7 @@ Truncate each download to at most a given duration — for example, only the fir
 uv run yodle -t video --limit 59m 'https://youtube.com/watch?v=...'
 ```
 
-Accepted forms: plain seconds (`90`), unit suffix (`90s`, `59m`, `2h`), or clock form (`1:30:00`, zero-padded). No flag means a full download. yt-dlp downloads only the requested range. For video the cut is frame-accurate: ffmpeg re-encodes at the cut point. For music there is no re-encode at the cut (audio has no keyframes), so the stream is copied and the audio is encoded exactly once. With `-t thumbnails` the flag is ignored.
+Accepted forms: plain seconds (`90`), unit suffix (`90s`, `59m`, `2h`), or clock form (`1:30:00`, zero-padded). No flag means a full download. yt-dlp downloads only the requested range as a stream copy — no re-encode, audio stays bit-exact, and the cut lands within a frame (it always starts at 0:00). Pass `--exact-cut` to re-encode the video at the cut instead. With `-t thumbnails` the flag is ignored.
 
 ### Configurable Output Directory
 
@@ -414,7 +423,7 @@ Accepted forms:
 **Notes:**
 - The value must be positive; `0` and negatives are rejected.
 - MM:SS alone (e.g. `1:30`) is not accepted — use `90s` or `1:00:30`.
-- Only the first DURATION of each video is fetched (bandwidth scales with the limit). For video, ffmpeg re-encodes at the cut point for a frame-accurate boundary; for music the audio stream is copied, so the file is encoded exactly once.
+- Only the first DURATION of each video is fetched (bandwidth scales with the limit). The range is stream-copied: no re-encode, audio bit-exact, cut within a frame (ranges always start at 0:00). Pass `--exact-cut` to re-encode for a guaranteed frame-exact edge.
 - With playlists, the limit applies to each video individually.
 - No-op with `-t thumbnails`.
 
@@ -423,6 +432,19 @@ Accepted forms:
 uv run yodle --limit 90s 'URL'
 uv run yodle -t video --limit 59m 'URL'
 uv run yodle -t music --limit 1:30:00 'URL'
+```
+
+#### `--exact-cut`
+
+With `--limit`, re-encode the video at the cut for a guaranteed frame-exact edge. Without it (the default), the range is stream-copied — much faster (no CPU-bound encode), audio stays bit-exact, and because ranges always start at 0:00 the cut still lands within a frame. Re-encoding drops `-c copy`, so it also re-encodes the audio.
+
+No-op for `-t music` (music never re-encodes at the cut), `-t thumbnails`, or when `--limit` is not set.
+
+**Default:** off
+
+**Examples:**
+```bash
+uv run yodle -t video --limit 59m --exact-cut 'URL'
 ```
 
 #### `-b, --browser {none,chrome,firefox}`

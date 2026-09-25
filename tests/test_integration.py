@@ -425,10 +425,17 @@ class TestLimitOpts:
         assert "download_ranges" not in opts
         assert "force_keyframes_at_cuts" not in opts
 
-    def test_video_with_limit_sets_range_opts(self, tmp_path):
-        """With limit_seconds, download_ranges covers 0..limit with forced keyframes."""
+    def test_video_with_limit_defaults_to_stream_copy(self, tmp_path):
+        """With limit_seconds, ranges are set but the download is stream-copied.
+
+        force_keyframes_at_cuts makes yt-dlp's ranged FFmpeg download omit
+        '-c copy': the whole range is re-encoded (~1-2x realtime, CPU-bound
+        'speed=1.99x') AND the audio is lossily re-encoded a second time.
+        A cut from 0:00 lands within a frame with plain '-c copy', so the
+        default is copy; --exact-cut opts back into the re-encode.
+        """
         opts = VideoDownloader(limit_seconds=60)._get_opts(tmp_path)
-        assert opts["force_keyframes_at_cuts"] is True
+        assert "force_keyframes_at_cuts" not in opts
         assert callable(opts["download_ranges"])
         assert list(opts["download_ranges"]({"id": "x"}, Mock())) == [
             {"start_time": 0, "end_time": 60}
@@ -437,6 +444,15 @@ class TestLimitOpts:
         assert opts["format"] == VideoDownloader.FORMAT_STRING
         assert opts["merge_output_format"] == "mp4"
         assert opts["postprocessors"] == [{"key": "FFmpegMetadata"}]
+
+    def test_video_exact_cut_forces_reencode(self, tmp_path):
+        """--exact-cut opts video back into the frame-exact re-encode."""
+        opts = VideoDownloader(limit_seconds=60, exact_cut=True)._get_opts(tmp_path)
+        assert opts["force_keyframes_at_cuts"] is True
+        assert callable(opts["download_ranges"])
+        assert list(opts["download_ranges"]({"id": "x"}, Mock())) == [
+            {"start_time": 0, "end_time": 60}
+        ]
 
     def test_music_with_limit_sets_range_opts_without_keyframes(self, tmp_path):
         """Music gets the range opts but MUST NOT force keyframes.
@@ -463,11 +479,64 @@ class TestLimitOpts:
         manager = DownloadManager(tmp_path)
         assert manager.video_downloader.limit_seconds is None
         assert manager.music_downloader.limit_seconds is None
+        assert manager.video_downloader.exact_cut is False
+
+    def test_download_manager_forwards_exact_cut(self, tmp_path):
+        """exact_cut reaches the video downloader; music never re-encodes."""
+        manager = DownloadManager(tmp_path, exact_cut=True)
+        assert manager.video_downloader.exact_cut is True
+        music_opts = manager.music_downloader._get_opts(tmp_path)
+        assert "force_keyframes_at_cuts" not in music_opts
+
+    def test_run_download_forwards_exact_cut(self, mocker):
+        """run_download passes --exact-cut through to DownloadManager."""
+        from types import SimpleNamespace
+        from yodle import run_download
+
+        mocker.patch("yodle.check_ffmpeg", return_value=True)
+        manager_cls = mocker.patch("yodle.DownloadManager")
+        manager_cls.return_value.download.return_value = []
+
+        args = SimpleNamespace(
+            urls=["https://youtube.com/watch?v=x"],
+            batch_file=None,
+            type="video",
+            video_format="mp4",
+            audio_format="mp3",
+            limit=60,
+            audio_quality=0,
+            normalize=False,
+            cookies_file=None,
+            browser=None,
+            exact_cut=True,
+        )
+        with pytest.raises(SystemExit):
+            run_download(args)
+
+        assert manager_cls.call_args.kwargs["exact_cut"] is True
+
+    def test_parser_exact_cut_flag(self):
+        """--exact-cut parses; default is off."""
+        from yodle import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["--exact-cut", "https://youtube.com/watch?v=x"])
+        assert args.exact_cut is True
+        args = parser.parse_args(["https://youtube.com/watch?v=x"])
+        assert args.exact_cut is False
 
     def test_apply_limit_opts_helper(self):
-        """Helper is a no-op for None and injects for a value."""
+        """No-op for None; by default injects ranges WITHOUT forcing keyframes."""
         assert _apply_limit_opts({"a": 1}, None) == {"a": 1}
         opts = _apply_limit_opts({"a": 1}, 30)
+        assert "force_keyframes_at_cuts" not in opts
+        assert list(opts["download_ranges"]({"id": "x"}, Mock())) == [
+            {"start_time": 0, "end_time": 30}
+        ]
+
+    def test_apply_limit_opts_force_keyframes(self):
+        """force_keyframes=True (--exact-cut) opts into the re-encode."""
+        opts = _apply_limit_opts({"a": 1}, 30, force_keyframes=True)
         assert opts["force_keyframes_at_cuts"] is True
         assert list(opts["download_ranges"]({"id": "x"}, Mock())) == [
             {"start_time": 0, "end_time": 30}
@@ -699,6 +768,7 @@ class TestBatchFile:
             normalize=False,
             cookies_file=None,
             browser=None,
+            exact_cut=False,
         )
         with pytest.raises(SystemExit):
             run_download(args)
@@ -730,6 +800,7 @@ class TestBatchFile:
             normalize=False,
             cookies_file=None,
             browser=None,
+            exact_cut=False,
         )
         with pytest.raises(SystemExit):
             run_download(args)

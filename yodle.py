@@ -223,15 +223,19 @@ def _apply_limit_opts(
     opts: dict,
     limit_seconds: Optional[int],
     *,
-    force_keyframes: bool = True,
+    force_keyframes: bool = False,
 ) -> dict:
     """Add yt-dlp download-range opts so only the first N seconds is fetched.
 
-    force_keyframes=True requests a re-encode at the cut for frame-accurate
-    VIDEO cuts. Music passes force_keyframes=False: audio has no keyframes,
-    and forcing them makes yt-dlp's ranged FFmpeg download omit '-c copy',
-    re-encoding the audio during download AND again in FFmpegExtractAudio
-    (a double lossy transcode).
+    force_keyframes=True makes yt-dlp re-encode the range (it omits
+    '-c copy' from the ranged FFmpeg download) for a frame-exact edge.
+    Default False — stream copy: the download runs at network speed instead
+    of CPU-bound encode speed, audio stays bit-exact (no second lossy
+    encode), and a cut from 0:00 lands within a frame because every frame
+    before it is decodable from the file's opening keyframe. Video passes
+    force_keyframes=exact_cut (--exact-cut); music always passes False —
+    audio has no keyframes, and re-encoding there only causes a double
+    lossy transcode (download + FFmpegExtractAudio).
     """
     if limit_seconds is not None:
         opts["download_ranges"] = download_range_func(None, [(0, limit_seconds)])
@@ -372,11 +376,13 @@ class VideoDownloader:
         progress_callback: Optional[Callable] = None,
         output_format: str = "mp4",
         limit_seconds: Optional[int] = None,
+        exact_cut: bool = False,
     ):
         self.cookies_path = cookies_path
         self.progress_callback = progress_callback
         self.output_format = output_format.lower()
         self.limit_seconds = limit_seconds
+        self.exact_cut = exact_cut
 
     def _get_opts(self, output_dir: Path) -> dict:
         """Get yt-dlp options for video download."""
@@ -396,7 +402,9 @@ class VideoDownloader:
         if self.progress_callback:
             opts["progress_hooks"] = [self._progress_hook]
 
-        return _apply_limit_opts(opts, self.limit_seconds)
+        return _apply_limit_opts(
+            opts, self.limit_seconds, force_keyframes=self.exact_cut
+        )
 
     def _progress_hook(self, d: dict) -> None:
         """Progress hook for yt-dlp."""
@@ -990,6 +998,7 @@ class DownloadManager:
         limit_seconds: Optional[int] = None,
         audio_quality: int = 0,
         normalize: bool = False,
+        exact_cut: bool = False,
     ):
         self.output_dir = output_dir
         self.cookies_path = cookies_path
@@ -999,6 +1008,7 @@ class DownloadManager:
         self.video_downloader = VideoDownloader(
             cookies_path, progress_callback, video_format,
             limit_seconds=limit_seconds,
+            exact_cut=exact_cut,
         )
         self.music_downloader = MusicDownloader(
             cookies_path, progress_callback, audio_format,
@@ -1198,6 +1208,7 @@ def run_download(args):
         limit_seconds=args.limit,
         audio_quality=args.audio_quality,
         normalize=args.normalize,
+        exact_cut=args.exact_cut,
     )
 
     # Start download — inline positional URLs first, then -a batch file entries
@@ -1313,6 +1324,17 @@ Examples:
         help=(
             "Download at most DURATION per video (90, 90s, 59m, 2h, or 1:30:00). "
             "Default: full download. No-op with -t thumbnails."
+        ),
+    )
+
+    parser.add_argument(
+        "--exact-cut",
+        action="store_true",
+        help=(
+            "With --limit, re-encode the video at the cut for a frame-exact edge "
+            "(slower; also re-encodes audio). Default: stream copy — network "
+            "speed, audio bit-exact, cut within a frame. No-op for music/"
+            "thumbnails or without --limit."
         ),
     )
 

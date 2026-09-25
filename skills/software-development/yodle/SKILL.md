@@ -74,8 +74,8 @@ YODLE_OUTPUT_DIR=/tmp/out uv run yodle -t video 'URL'     # override output dir
 2. **Install dependencies** — `terminal(command="uv sync")`.
    Done when: exit 0 and `.venv/` exists.
 3. **Confirm CLI loads** — `terminal(command="uv run yodle.py --help")`.
-   Done when: flag table prints (includes `--limit`, `--audio-quality`,
-   `--normalize`) with exit 0.
+   Done when: flag table prints (includes `--limit`, `--exact-cut`,
+   `--audio-quality`, `--normalize`) with exit 0.
 4. **Run the requested download** — quote the URL; set `YODLE_OUTPUT_DIR` if
    the user wants a non-default location (also readable from project-root
    `.env`). Done when: process exits 0 and the output file exists (default
@@ -100,8 +100,9 @@ YODLE_OUTPUT_DIR=/tmp/out uv run yodle -t video 'URL'     # override output dir
 - **m4a has no cover art / audio sounds double-encoded** — postprocessor order
   and dict-scoped `postprocessor_args` are load-bearing; see `CLAUDE.md`
   Technical Details before touching `MusicDownloader`.
-- **`--limit` on music must not set `force_keyframes_at_cuts`** — it would
-  drop `-c copy` and double-transcode. Video keeps it for frame-accurate cuts.
+- **`--limit` stream-copies by default; only `--exact-cut` (video) may set
+  `force_keyframes_at_cuts`** — forcing it drops `-c copy`, which
+  double-transcodes music and makes video cuts CPU-bound (~1–2x).
 - **Batch runs pause 1–15 min between downloads by design** (YouTube risk-flag
   avoidance, logged as "Pausing Ns before the next download"). Don't treat a
   long multi-URL run as a hang, and don't remove `PAUSE_MIN_SECONDS` /
@@ -112,7 +113,8 @@ YODLE_OUTPUT_DIR=/tmp/out uv run yodle -t video 'URL'     # override output dir
 ## Verification
 
 - `terminal(command="uv run yodle.py --help", timeout=120)` exits 0 and lists
-  the current flags (`--limit`, `--audio-quality`, `--normalize`).
+  the current flags (`--limit`, `--exact-cut`, `--audio-quality`,
+  `--normalize`).
 - `terminal(command="uv run --with-requirements requirements-test.txt pytest -q", timeout=600)`
   exits 0 with no failures.
 - A probe download lands a non-empty file in the output directory (use a short
